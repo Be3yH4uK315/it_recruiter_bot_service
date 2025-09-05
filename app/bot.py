@@ -7,6 +7,7 @@ from app.handlers import common
 
 logging.basicConfig(level=logging.INFO)
 
+
 async def main():
     bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
     dp = Dispatcher()
@@ -17,6 +18,7 @@ async def main():
         await dp.start_polling(bot)
     finally:
         await bot.session.close()
+
 
 if __name__ == "__main__":
     try:
