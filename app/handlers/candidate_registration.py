@@ -2,7 +2,7 @@ from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
 from app.states.candidate import CandidateRegistration
-from app.services.api_client import api_client
+from app.services.api_client import candidate_api_client
 
 router = Router()
 
@@ -42,7 +42,7 @@ async def handle_skills(message: types.Message, state: FSMContext):
     await message.answer("Спасибо! Сохраняю ваш обновленный профиль...")
 
     telegram_id = message.from_user.id
-    success = await api_client.update_candidate_profile(telegram_id, user_data)
+    success = await candidate_api_client.update_candidate_profile(telegram_id, user_data)
 
     if success:
         await message.answer(
