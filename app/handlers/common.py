@@ -3,6 +3,8 @@ from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from app.keyboards.inline import get_role_selection_keyboard, RoleCallback
 from app.services.api_client import api_client
+from aiogram.fsm.context import FSMContext
+from app.states.candidate import CandidateRegistration
 
 router = Router()
 
@@ -18,26 +20,19 @@ async def cmd_start(message: Message):
 
 
 @router.callback_query(RoleCallback.filter(F.role_name == "candidate"))
-async def cq_select_candidate(callback: CallbackQuery, callback_data: RoleCallback):
-    await callback.answer(
-        "Вы выбрали роль 'Кандидат'. Создаем ваш профиль...", show_alert=False
-    )
+async def cq_select_candidate(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
 
     user = callback.from_user
-    new_candidate = await api_client.create_candidate(
+    await api_client.create_candidate(
         telegram_id=user.id, display_name=user.username or user.full_name
     )
 
-    if new_candidate:
-        await callback.message.edit_text(
-            "✅ Ваш профиль успешно создан!\n\n"
-            "Теперь вы можете его заполнить, используя команду /profile."
-        )
-    else:
-        await callback.message.edit_text(
-            "💡 Ваш профиль уже существует.\n\n"
-            "Вы можете отредактировать его, используя команду /profile."
-        )
+    await state.set_state(CandidateRegistration.entering_headline_role)
+    await callback.message.edit_text(
+        "Отлично! Давайте заполним ваш профиль.\n\n"
+        "<b>Шаг 1/3:</b> Введите вашу основную должность (например, Python Backend Developer):"
+    )
 
 
 @router.callback_query(RoleCallback.filter(F.role_name == "employer"))

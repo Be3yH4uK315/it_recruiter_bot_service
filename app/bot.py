@@ -2,7 +2,7 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from app.core.config import BOT_TOKEN
-from app.handlers import common
+from app.handlers import common, candidate_registration
 
 
 logging.basicConfig(level=logging.INFO)
@@ -13,6 +13,7 @@ async def main():
     dp = Dispatcher()
 
     dp.include_router(common.router)
+    dp.include_router(candidate_registration.router)
 
     try:
         await dp.start_polling(bot)
