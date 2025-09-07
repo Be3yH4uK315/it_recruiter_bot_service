@@ -1,10 +1,11 @@
 from aiogram import Router, F, types
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from typing import Dict, Any
 
 from app.states.employer import EmployerSearch
 from app.services.api_client import employer_api_client, search_api_client, candidate_api_client
-from app.keyboards.inline import get_search_results_keyboard, SearchResultAction
+from app.keyboards.inline import get_search_results_keyboard, SearchResultAction, SearchResultDecision
 
 router = Router()
 
@@ -18,48 +19,83 @@ def format_candidate_profile(profile: Dict[str, Any]) -> str:
         f"<b>Локация:</b> {profile.get('location', 'Не указана')}"
     )
 
-async def show_candidate_profile(message: types.Message, state: FSMContext):
+
+async def show_candidate_profile(message: types.Message, state: FSMContext, session_id: str):
     data = await state.get_data()
-    idx = data['current_index']
-    candidate_ids = data['found_candidates']
+    idx = data.get('current_index', 0)
+    candidate_ids = data.get('found_candidates', [])
+
+    if not candidate_ids or idx >= len(candidate_ids):
+        await message.answer("Больше кандидатов по вашему запросу нет. Можете начать новый поиск /search.")
+        await state.clear()
+        return
 
     candidate_id = candidate_ids[idx]
     profile = await candidate_api_client.get_candidate(candidate_id)
 
     if not profile:
-        await message.answer("Не удалось загрузить профиль кандидата. Попробуйте снова.")
+        await message.answer("Не удалось загрузить профиль кандидата. Показываю следующего.")
+        await state.update_data(current_index=idx + 1)
+        await show_candidate_profile(message, state, session_id)
         return
 
     is_last = (idx + 1) >= len(candidate_ids)
-    keyboard = get_search_results_keyboard(candidate_id, is_last)
-    await message.answer(format_candidate_profile(profile), reply_markup=keyboard)
+    keyboard = get_search_results_keyboard(session_id, candidate_id, is_last)
+
+    if isinstance(message, types.CallbackQuery):
+        await message.message.answer(format_candidate_profile(profile), reply_markup=keyboard)
+    else:
+        await message.answer(format_candidate_profile(profile), reply_markup=keyboard)
 
 
 @router.message(EmployerSearch.entering_role)
 async def handle_search_role(message: types.Message, state: FSMContext):
     await state.update_data(role=message.text)
     await state.set_state(EmployerSearch.entering_must_skills)
-    await message.answer("Принято. Какие ключевые навыки и технологии обязательны? (перечислите через запятую)")
+    await message.answer("<b>Шаг 2/5:</b> Какие ключевые навыки и технологии обязательны? (через запятую)")
 
 @router.message(EmployerSearch.entering_must_skills)
 async def handle_search_skills(message: types.Message, state: FSMContext):
     skills = [s.strip().lower() for s in message.text.split(',')]
     await state.update_data(must_skills=skills)
+    await state.set_state(EmployerSearch.entering_nice_skills)
+    await message.answer("<b>Шаг 3/5:</b> Какие навыки желательны, но не обязательны? (через запятую, или /skip)")
+
+
+@router.message(Command("skip"), EmployerSearch.entering_nice_skills)
+@router.message(EmployerSearch.entering_nice_skills)
+async def handle_nice_skills(message: types.Message, state: FSMContext):
+    if message.text != "/skip":
+        skills = [s.strip().lower() for s in message.text.split(',')]
+        await state.update_data(nice_skills=skills)
+
     await state.set_state(EmployerSearch.entering_experience)
-    await message.answer("Какой минимальный опыт работы в годах требуется? (введите число, например, 3)")
+    await message.answer("<b>Шаг 4/5:</b> Какой минимальный и максимальный опыт требуется? (например, 2-5)")
+
 
 @router.message(EmployerSearch.entering_experience)
 async def handle_search_experience(message: types.Message, state: FSMContext):
     try:
-        exp = float(message.text.replace(',', '.'))
-        await state.update_data(experience_min=exp)
-    except ValueError:
-        await message.answer("Пожалуйста, введите число. Попробуйте еще раз.")
+        parts = message.text.replace(',', '.').split('-')
+        exp_min = float(parts[0].strip())
+        exp_max = float(parts[1].strip()) if len(parts) > 1 else None
+        await state.update_data(experience_min=exp_min, experience_max=exp_max)
+    except (ValueError, IndexError):
+        await message.answer("Неверный формат. Введите число или диапазон, например: 3 или 2-5. Попробуйте еще раз.")
         return
+
+    await state.set_state(EmployerSearch.entering_location_and_work_modes)
+    await message.answer("<b>Шаг 5/5:</b> Укажите желаемую локацию и форматы работы. (например, EU remote, или /skip)")
+
+
+@router.message(Command("skip"), EmployerSearch.entering_location_and_work_modes)
+@router.message(EmployerSearch.entering_location_and_work_modes)
+async def handle_location_and_start_search(message: types.Message, state: FSMContext):
+    if message.text != "/skip":
+        await state.update_data(location_query=message.text)
 
     await message.answer("💾 Сохранил. Начинаю поиск кандидатов...", reply_markup=types.ReplyKeyboardRemove())
     filters = await state.get_data()
-
 
     employer_profile = await employer_api_client.get_or_create_employer(message.from_user.id, message.from_user.username)
     if not employer_profile:
@@ -67,7 +103,14 @@ async def handle_search_experience(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    await employer_api_client.create_search_session(employer_profile['id'], filters)
+    search_session = await employer_api_client.create_search_session(employer_profile['id'], filters)
+    if not search_session:
+        await message.answer("❌ Не удалось создать сессию поиска. Попробуйте позже.")
+        await state.clear()
+        return
+
+    session_id = search_session['id']
+    await state.update_data(session_id=session_id)
 
     search_results = await search_api_client.search_candidates(filters)
     if not search_results:
@@ -80,19 +123,72 @@ async def handle_search_experience(message: types.Message, state: FSMContext):
     await state.set_state(EmployerSearch.showing_results)
 
     await message.answer(f"✅ Найдено кандидатов: {len(candidate_ids)}. Показываю первого:")
-    await show_candidate_profile(message, state)
+    await show_candidate_profile(message, state, session_id)
+
+
+async def process_next_candidate(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+
+    current_candidate_id = data['found_candidates'][data['current_index']]
+    viewed_ids = data.get('viewed_candidates', [])
+    if current_candidate_id not in viewed_ids:
+        viewed_ids.append(current_candidate_id)
+
+    new_index = data['current_index'] + 1
+
+    await state.update_data(current_index=new_index, viewed_candidates=viewed_ids)
+
+    await callback.message.delete()
+    await show_candidate_profile(callback, state, data['session_id'])
+    await callback.answer()
+
+
+@router.callback_query(SearchResultDecision.filter(), EmployerSearch.showing_results)
+async def handle_decision(callback: types.CallbackQuery, callback_data: SearchResultDecision, state: FSMContext):
+    success = await employer_api_client.save_decision(
+        session_id=callback_data.session_id,
+        candidate_id=callback_data.candidate_id,
+        decision=callback_data.action
+    )
+    if success:
+        await callback.answer(f"Ваш выбор '{callback_data.action}' сохранен.")
+    else:
+        await callback.answer("Не удалось сохранить выбор.", show_alert=True)
+
+    await process_next_candidate(callback, state)
 
 
 @router.callback_query(SearchResultAction.filter(F.action == "next"), EmployerSearch.showing_results)
 async def handle_next_candidate(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    new_index = data['current_index'] + 1
-    await state.update_data(current_index=new_index)
+    await process_next_candidate(callback, state)
 
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await show_candidate_profile(callback.message, state)
-    await callback.answer()
 
 @router.callback_query(SearchResultAction.filter(F.action == "contact"), EmployerSearch.showing_results)
 async def handle_show_contact(callback: types.CallbackQuery, callback_data: SearchResultAction, state: FSMContext):
-    await callback.answer("Функция показа контактов в разработке.", show_alert=True)
+    data = await state.get_data()
+    employer_profile = data.get('employer_profile')
+    if not employer_profile:
+        profile = await employer_api_client.get_or_create_employer(callback.from_user.id, callback.from_user.username)
+        if not profile:
+            await callback.answer("Не удалось получить ваш профиль работодателя. Попробуйте снова.", show_alert=True)
+            return
+        await state.update_data(employer_profile=profile)
+        employer_profile = profile
+
+    await callback.answer("Запрашиваю контакты...")
+
+    response = await employer_api_client.request_contacts(
+        employer_id=employer_profile['id'],
+        candidate_id=callback_data.candidate_id
+    )
+
+    if not response:
+        await callback.message.answer("❌ Произошла ошибка при запросе контактов.")
+        return
+
+    if response.get("granted") and response.get("contacts"):
+        contacts = response["contacts"]
+        contact_text = "\n".join([f"<b>{key.capitalize()}:</b> {value}" for key, value in contacts.items()])
+        await callback.message.answer(f"✅ Доступ получен. Контакты кандидата:\n\n{contact_text}")
+    else:
+        await callback.message.answer("🤷‍♂️ Кандидат ограничил доступ к своим контактам.")

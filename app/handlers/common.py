@@ -11,7 +11,8 @@ router = Router()
 
 
 @router.message(Command("start"))
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer(
         "👋 Добро пожаловать в IT Recruiter Bot!\n\n"
         "Я помогу вам найти работу или подобрать специалиста в IT.\n\n"
@@ -32,7 +33,7 @@ async def cq_select_candidate(callback: CallbackQuery, state: FSMContext):
     await state.set_state(CandidateRegistration.entering_headline_role)
     await callback.message.edit_text(
         "Отлично! Давайте заполним ваш профиль.\n\n"
-        "<b>Шаг 1/3:</b> Введите вашу основную должность (например, Python Backend Developer):"
+        "<b>Шаг 1/6:</b> Введите вашу основную должность (например, Python Backend Developer):"
     )
 
 
@@ -41,6 +42,15 @@ async def cq_select_employer(callback: CallbackQuery, state: FSMContext):
     await state.set_state(EmployerSearch.entering_role)
     await callback.message.edit_text(
         "Отлично! Начинаем поиск кандидатов.\n\n"
-        "<b>Шаг 1/3:</b> Какую должность вы ищете? (например, Frontend Developer)"
+        "<b>Шаг 1/5:</b> Какую должность вы ищете? (например, Frontend Developer)"
     )
     await callback.answer()
+
+
+@router.message(Command("search"))
+async def cmd_search(message: Message, state: FSMContext):
+    await state.set_state(EmployerSearch.entering_role)
+    await message.answer(
+        "Начинаем новый поиск кандидатов.\n\n"
+        "<b>Шаг 1/5:</b> Какую должность вы ищете? (например, Frontend Developer)"
+    )
