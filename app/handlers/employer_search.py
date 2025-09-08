@@ -5,17 +5,18 @@ from typing import Dict, Any
 
 from app.states.employer import EmployerSearch
 from app.services.api_client import employer_api_client, search_api_client, candidate_api_client
-from app.keyboards.inline import get_search_results_keyboard, SearchResultAction, SearchResultDecision
+from app.keyboards.inline import get_liked_candidate_keyboard, get_initial_search_keyboard, SearchResultAction, SearchResultDecision
 
 router = Router()
 
 def format_candidate_profile(profile: Dict[str, Any]) -> str:
-    skills = ", ".join(skill['skill'] for skill in profile.get('skills', []))
+    skills_list = profile.get('skills', [])
+    skills = ", ".join(skill['skill'] for skill in skills_list) if skills_list else 'Не указаны'
     return (
         f"👤 <b>{profile.get('display_name', 'Имя не указано')}</b>\n"
         f"<i>{profile.get('headline_role', 'Должность не указана')}</i>\n\n"
         f"<b>Опыт:</b> {profile.get('experience_years', 0)} лет\n"
-        f"<b>Навыки:</b> {skills if skills else 'Не указаны'}\n"
+        f"<b>Навыки:</b> {skills}\n"
         f"<b>Локация:</b> {profile.get('location', 'Не указана')}"
     )
 
@@ -26,7 +27,11 @@ async def show_candidate_profile(message: types.Message, state: FSMContext, sess
     candidate_ids = data.get('found_candidates', [])
 
     if not candidate_ids or idx >= len(candidate_ids):
-        await message.answer("Больше кандидатов по вашему запросу нет. Можете начать новый поиск /search.")
+        if isinstance(message, types.CallbackQuery):
+            await message.answer()
+            await message.message.answer("Больше кандидатов по вашему запросу нет. Можете начать новый поиск /search.")
+        else:
+            await message.answer("Больше кандидатов по вашему запросу нет. Можете начать новый поиск /search.")
         await state.clear()
         return
 
@@ -39,8 +44,7 @@ async def show_candidate_profile(message: types.Message, state: FSMContext, sess
         await show_candidate_profile(message, state, session_id)
         return
 
-    is_last = (idx + 1) >= len(candidate_ids)
-    keyboard = get_search_results_keyboard(session_id, candidate_id, is_last)
+    keyboard = get_initial_search_keyboard(candidate_id)
 
     if isinstance(message, types.CallbackQuery):
         await message.message.answer(format_candidate_profile(profile), reply_markup=keyboard)
@@ -128,34 +132,44 @@ async def handle_location_and_start_search(message: types.Message, state: FSMCon
 
 async def process_next_candidate(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    session_id = data.get("session_id")
+    if not session_id:
+        await callback.answer("Сессия истекла.", show_alert=True)
+        return
 
-    current_candidate_id = data['found_candidates'][data['current_index']]
-    viewed_ids = data.get('viewed_candidates', [])
-    if current_candidate_id not in viewed_ids:
-        viewed_ids.append(current_candidate_id)
-
-    new_index = data['current_index'] + 1
-
-    await state.update_data(current_index=new_index, viewed_candidates=viewed_ids)
+    new_index = data.get('current_index', 0) + 1
+    await state.update_data(current_index=new_index)
 
     await callback.message.delete()
-    await show_candidate_profile(callback, state, data['session_id'])
+    await show_candidate_profile(callback, state, session_id)
     await callback.answer()
-
 
 @router.callback_query(SearchResultDecision.filter(), EmployerSearch.showing_results)
 async def handle_decision(callback: types.CallbackQuery, callback_data: SearchResultDecision, state: FSMContext):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+
+    if not session_id:
+        await callback.answer("Ошибка: сессия поиска истекла. Начните заново.", show_alert=True)
+        return
+
     success = await employer_api_client.save_decision(
-        session_id=callback_data.session_id,
+        session_id=session_id,
         candidate_id=callback_data.candidate_id,
         decision=callback_data.action
     )
-    if success:
-        await callback.answer(f"Ваш выбор '{callback_data.action}' сохранен.")
-    else:
-        await callback.answer("Не удалось сохранить выбор.", show_alert=True)
 
-    await process_next_candidate(callback, state)
+    if not success:
+        await callback.answer("Не удалось сохранить выбор.", show_alert=True)
+        return
+
+    if callback_data.action == "like":
+        await callback.answer("✅ Кандидат отмечен как подходящий.")
+        new_keyboard = get_liked_candidate_keyboard(callback_data.candidate_id)
+        await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+    else:
+        await callback.answer("Выбор сохранен.")
+        await process_next_candidate(callback, state)
 
 
 @router.callback_query(SearchResultAction.filter(F.action == "next"), EmployerSearch.showing_results)
@@ -175,7 +189,7 @@ async def handle_show_contact(callback: types.CallbackQuery, callback_data: Sear
         await state.update_data(employer_profile=profile)
         employer_profile = profile
 
-    await callback.answer("Запрашиваю контакты...")
+    await callback.answer("Запрашиваю контакты...", show_alert=False)
 
     response = await employer_api_client.request_contacts(
         employer_id=employer_profile['id'],

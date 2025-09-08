@@ -185,7 +185,7 @@ class EmployerAPIClient:
                 return None
 
     async def save_decision(self, session_id: str, candidate_id: str, decision: str) -> bool:
-        url = f"{EMPLOYER_SERVICE_URL}/searches/{session_id}/decisions"
+        url = f"{self.base_url}searches/{session_id}/decisions"
         payload = {"candidate_id": candidate_id, "decision": decision}
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
             try:
@@ -219,7 +219,7 @@ class SearchAPIClient:
     def __init__(self):
         self.base_url = f"{SEARCH_SERVICE_URL}/search/"
 
-    async def search_candidates(self, filters: dict, exclude_ids: List[str]) -> Optional[List[Dict[str, Any]]]:
+    async def search_candidates(self, filters: dict, exclude_ids: List[str] = None) -> Optional[List[Dict[str, Any]]]:
         payload = filters.copy()
         payload['exclude_ids'] = exclude_ids
 
@@ -227,7 +227,7 @@ class SearchAPIClient:
             http2=False, trust_env=False, timeout=10.0
         ) as client:
             try:
-                response = await client.post(self.base_url, json=filters)
+                response = await client.post(self.base_url, json=payload)
                 response.raise_for_status()
                 return response.json().get("results", [])
             except httpx.HTTPStatusError as e:

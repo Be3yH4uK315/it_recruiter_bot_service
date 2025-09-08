@@ -20,7 +20,6 @@ class ProfileAction(CallbackData, prefix="profile_action"):
 
 class SearchResultDecision(CallbackData, prefix="search_dec"):
     action: str
-    session_id: str
     candidate_id: str
 
 
@@ -69,35 +68,43 @@ def get_profile_actions_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_search_results_keyboard(session_id: str, candidate_id: str, is_last: bool) -> InlineKeyboardMarkup:
-    decision_buttons = [
-        InlineKeyboardButton(
-            text="👍 Подходит",
-            callback_data=SearchResultDecision(action="like", session_id=session_id, candidate_id=candidate_id).pack()
-        ),
-        InlineKeyboardButton(
-            text="👎 Не подходит",
-            callback_data=SearchResultDecision(action="dislike", session_id=session_id,
-                                               candidate_id=candidate_id).pack()
-        )
+def get_initial_search_keyboard(candidate_id: str) -> InlineKeyboardMarkup:
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                text="👍 Подходит",
+                callback_data=SearchResultDecision(action="like", candidate_id=candidate_id).pack()
+            ),
+            InlineKeyboardButton(
+                text="👎 Не подходит",
+                callback_data=SearchResultDecision(action="dislike", candidate_id=candidate_id).pack()
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="➡️ Следующий (пропустить)",
+                callback_data=SearchResultAction(action="next", candidate_id="0").pack()
+            )
+        ]
     ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-    action_buttons = [
-        InlineKeyboardButton(
-            text="📞 Показать контакты",
-            callback_data=SearchResultAction(action="contact", candidate_id=candidate_id).pack()
-        )
-    ]
 
-    if not is_last:
-        action_buttons.append(
+def get_liked_candidate_keyboard(candidate_id: str) -> InlineKeyboardMarkup:
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                text="📞 Показать контакты",
+                callback_data=SearchResultAction(action="contact", candidate_id=candidate_id).pack()
+            )
+        ],
+        [
             InlineKeyboardButton(
                 text="➡️ Следующий",
                 callback_data=SearchResultAction(action="next", candidate_id="0").pack()
             )
-        )
-
-    keyboard = [decision_buttons, action_buttons]
+        ]
+    ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
