@@ -2,7 +2,7 @@ from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
 from app.states.candidate import CandidateRegistration
-from app.services.api_client import candidate_api_client
+from app.services.api_client import candidate_api_client, file_api_client
 from app.keyboards.inline import get_work_modes_keyboard, WorkModeCallback
 
 router = Router()
@@ -82,24 +82,24 @@ async def handle_skip_resume(message: types.Message, state: FSMContext):
 
 @router.message(F.document, CandidateRegistration.uploading_resume)
 async def handle_resume_upload(message: types.Message, state: FSMContext):
-    document = message.document
-    if document.mime_type not in ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]:
-        await message.answer("Пожалуйста, загрузите файл в формате PDF или DOCX.")
-        return
-    if document.file_size > 10 * 1024 * 1024:
-        await message.answer("Файл слишком большой. Максимальный размер - 10 МБ.")
+
+    file_info = await message.bot.get_file(message.document.file_id)
+    file_data = await message.bot.download_file(file_info.file_path)
+
+    metadata = await file_api_client.upload_resume(
+        filename=message.document.file_name,
+        file_data=file_data.read(),
+        content_type=message.document.mime_type
+    )
+
+    if not metadata:
+        await message.answer("❌ Произошла ошибка при загрузке файла. Попробуйте снова.")
         return
 
-    # Здесь должна быть логика загрузки файла в S3/MinIO
-    # Просто симулируем это.
-    file_metadata = {
-        "filename": document.file_name,
-        "mime_type": document.mime_type,
-        "size_bytes": document.file_size,
-        "telegram_file_id": document.file_id,
-    }
-    await state.update_data(resume_meta=file_metadata)
-    await message.answer("✅ Резюме принято!")
+    metadata["telegram_file_id"] = message.document.file_id
+
+    await state.update_data(resume_meta=metadata)
+    await message.answer("✅ Резюме загружено и сохранено!")
     await process_profile_completion(message, state)
 
 

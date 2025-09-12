@@ -44,7 +44,9 @@ async def show_candidate_profile(message: types.Message, state: FSMContext, sess
         await show_candidate_profile(message, state, session_id)
         return
 
-    keyboard = get_initial_search_keyboard(candidate_id)
+    has_resume = bool(profile.get("resumes"))
+
+    keyboard = get_initial_search_keyboard(candidate_id, has_resume)
 
     if isinstance(message, types.CallbackQuery):
         await message.message.answer(format_candidate_profile(profile), reply_markup=keyboard)
@@ -206,3 +208,21 @@ async def handle_show_contact(callback: types.CallbackQuery, callback_data: Sear
         await callback.message.answer(f"✅ Доступ получен. Контакты кандидата:\n\n{contact_text}")
     else:
         await callback.message.answer("🤷‍♂️ Кандидат ограничил доступ к своим контактам.")
+
+
+@router.callback_query(SearchResultAction.filter(F.action == "get_resume"), EmployerSearch.showing_results)
+async def handle_get_resume(callback: types.CallbackQuery, callback_data: SearchResultAction):
+    await callback.answer("Запрашиваю ссылку...")
+
+    link = await candidate_api_client.get_resume_download_link(callback_data.candidate_id)
+
+    if link:
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="📥 Скачать файл", url=link)]
+        ])
+        await callback.message.answer(
+            "🔗 Ваша ссылка на скачивание (действительна 5 минут):",
+            reply_markup=keyboard
+        )
+    else:
+        await callback.message.answer("Не удалось получить ссылку на резюме. Возможно, кандидат удалил его.")

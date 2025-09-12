@@ -3,6 +3,7 @@ from app.core.config import (
     CANDIDATE_SERVICE_URL,
     EMPLOYER_SERVICE_URL,
     SEARCH_SERVICE_URL,
+    FILE_SERVICE_URL,
 )
 from typing import List, Dict, Any, Optional
 import logging
@@ -147,6 +148,15 @@ class CandidateAPIClient:
                 logger.error(f"CandidateAPI: Request error getting candidate by tg_id: {e}")
                 return None
 
+    async def get_resume_download_link(self, candidate_id: str) -> Optional[str]:
+        async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
+            try:
+                response = await client.get(f"{self.base_url}{candidate_id}/resume")
+                response.raise_for_status()
+                return response.json().get("download_url")
+            except (httpx.RequestError, httpx.HTTPStatusError):
+                return None
+
 
 class EmployerAPIClient:
     def __init__(self):
@@ -237,6 +247,25 @@ class SearchAPIClient:
                 logger.error(f"SearchAPI: Request error during search: {e}")
                 return None
 
+
+class FileAPIClient:
+    def __init__(self):
+        self.base_url = f"{FILE_SERVICE_URL}/files" #
+
+    async def upload_resume(self, filename: str, file_data: bytes, content_type: str) -> Optional[Dict[str, Any]]:
+        files = {'file': (filename, file_data, content_type)}
+        async with httpx.AsyncClient(
+            http2=False, trust_env=False, timeout=10.0
+        ) as client:
+            try:
+                response = await client.post(f"{self.base_url}/upload/resume", files=files)
+                response.raise_for_status()
+                return response.json()
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                logger.error(f"FileAPI: Error uploading resume: {e}")
+                return None
+
 candidate_api_client = CandidateAPIClient()
 employer_api_client = EmployerAPIClient()
 search_api_client = SearchAPIClient()
+file_api_client = FileAPIClient()

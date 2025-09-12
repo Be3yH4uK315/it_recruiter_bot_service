@@ -68,7 +68,7 @@ def get_profile_actions_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_initial_search_keyboard(candidate_id: str) -> InlineKeyboardMarkup:
+def get_initial_search_keyboard(candidate_id: str, has_resume: bool) -> InlineKeyboardMarkup:
     keyboard = [
         [
             InlineKeyboardButton(
@@ -79,14 +79,23 @@ def get_initial_search_keyboard(candidate_id: str) -> InlineKeyboardMarkup:
                 text="👎 Не подходит",
                 callback_data=SearchResultDecision(action="dislike", candidate_id=candidate_id).pack()
             )
-        ],
-        [
-            InlineKeyboardButton(
-                text="➡️ Следующий (пропустить)",
-                callback_data=SearchResultAction(action="next", candidate_id="0").pack()
-            )
         ]
     ]
+
+    if has_resume:
+        keyboard.append([
+            InlineKeyboardButton(
+                text="📄 Скачать резюме",
+                callback_data=SearchResultAction(action="get_resume", candidate_id=candidate_id).pack()
+            )
+        ])
+
+    keyboard.append([
+        InlineKeyboardButton(
+            text="➡️ Следующий (пропустить)",
+            callback_data=SearchResultAction(action="next", candidate_id="0").pack()
+        )
+    ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
