@@ -9,7 +9,6 @@ from app.states.employer import EmployerSearch
 
 router = Router()
 
-
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
@@ -20,22 +19,20 @@ async def cmd_start(message: Message, state: FSMContext):
         reply_markup=get_role_selection_keyboard(),
     )
 
-
 @router.callback_query(RoleCallback.filter(F.role_name == "candidate"))
 async def cq_select_candidate(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
     user = callback.from_user
     await candidate_api_client.create_candidate(
-        telegram_id=user.id, display_name=user.username or user.full_name
+        telegram_id=user.id, telegram_name=user.username or user.full_name
     )
 
-    await state.set_state(CandidateRegistration.entering_headline_role)
+    await state.set_state(CandidateRegistration.entering_display_name)
     await callback.message.edit_text(
-        "Отлично! Давайте заполним ваш профиль.\n\n"
-        "<b>Шаг 1/6:</b> Введите вашу основную должность (например, Python Backend Developer):"
+        "Отлично! Давайте начнем с вашего профиля.\n\n"
+        "<b>Шаг 1/7:</b> Пожалуйста, введите ваши Фамилию и Имя:"
     )
-
 
 @router.callback_query(RoleCallback.filter(F.role_name == "employer"))
 async def cq_select_employer(callback: CallbackQuery, state: FSMContext):
@@ -45,7 +42,6 @@ async def cq_select_employer(callback: CallbackQuery, state: FSMContext):
         "<b>Шаг 1/5:</b> Какую должность вы ищете? (например, Frontend Developer)"
     )
     await callback.answer()
-
 
 @router.message(Command("search"))
 async def cmd_search(message: Message, state: FSMContext):

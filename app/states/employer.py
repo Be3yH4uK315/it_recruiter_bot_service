@@ -1,5 +1,6 @@
 from aiogram.fsm.state import State, StatesGroup
 
+# --- EMPLOYER ---
 class EmployerSearch(StatesGroup):
     entering_role = State()
     entering_must_skills = State()

@@ -4,9 +4,7 @@ from aiogram import Bot, Dispatcher
 from app.core.config import BOT_TOKEN
 from app.handlers import common, candidate_registration, employer_search, candidate_profile
 
-
 logging.basicConfig(level=logging.INFO)
-
 
 async def main():
     bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
@@ -21,7 +19,6 @@ async def main():
         await dp.start_polling(bot)
     finally:
         await bot.session.close()
-
 
 if __name__ == "__main__":
     try:

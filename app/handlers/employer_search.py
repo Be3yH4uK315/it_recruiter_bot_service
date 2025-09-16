@@ -2,24 +2,46 @@ from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from typing import Dict, Any
-
 from app.states.employer import EmployerSearch
-from app.services.api_client import employer_api_client, search_api_client, candidate_api_client
+from app.services.api_client import employer_api_client, search_api_client, candidate_api_client, file_api_client
 from app.keyboards.inline import get_liked_candidate_keyboard, get_initial_search_keyboard, SearchResultAction, SearchResultDecision
 
 router = Router()
 
+# --- FORMAT PROFILE ---
 def format_candidate_profile(profile: Dict[str, Any]) -> str:
-    skills_list = profile.get('skills', [])
-    skills = ", ".join(skill['skill'] for skill in skills_list) if skills_list else 'Не указаны'
-    return (
-        f"👤 <b>{profile.get('display_name', 'Имя не указано')}</b>\n"
-        f"<i>{profile.get('headline_role', 'Должность не указана')}</i>\n\n"
-        f"<b>Опыт:</b> {profile.get('experience_years', 0)} лет\n"
-        f"<b>Навыки:</b> {skills}\n"
-        f"<b>Локация:</b> {profile.get('location', 'Не указана')}"
+    text = (
+        f"<b>👤 Имя:</b> {profile.get('display_name', 'Не указано')}\n"
+        f"<b>📌 Должность:</b> {profile.get('headline_role', 'Не указано')}\n"
+        f"<b>📈 Опыт:</b> {profile.get('experience_years', 'Не указан')} лет\n"
+        f"<b>📍 Локация:</b> {profile.get('location', 'Не указана')}\n"
+        f"<b>💻 Форматы работы:</b> {', '.join(profile.get('work_modes', ['Не указаны']))}\n"
     )
 
+    skills = profile.get('skills', [])
+    if skills:
+        hard_skills = [s['skill'] for s in skills if s['kind'] == 'hard']
+        tools = [s['skill'] for s in skills if s['kind'] == 'tool']
+
+        skills_text = "\n<b>🛠 Ключевые навыки и инструменты:</b>\n"
+        if hard_skills:
+            skills_text += f" • <b>Hard Skills:</b> {', '.join(hard_skills)}\n"
+        if tools:
+            skills_text += f" • <b>Инструменты:</b> {', '.join(tools)}\n"
+        text += skills_text
+
+    projects = profile.get('projects', [])
+    if projects:
+        projects_text = "\n<b>🚀 Проекты:</b>\n"
+        for p in projects:
+            projects_text += f"  - <b>{p.get('title', 'Без названия')}</b>\n"
+            if p.get('description'):
+                projects_text += f"    <i>{p.get('description')}</i>\n"
+            if p.get('links') and p['links'].get('main_link'):
+                 projects_text += f"    <a href='{p['links']['main_link']}'>Ссылка</a>\n"
+        text += projects_text
+
+    return text
 
 async def show_candidate_profile(message: types.Message, state: FSMContext, session_id: str):
     data = await state.get_data()
@@ -53,20 +75,21 @@ async def show_candidate_profile(message: types.Message, state: FSMContext, sess
     else:
         await message.answer(format_candidate_profile(profile), reply_markup=keyboard)
 
-
+# --- EMPLOYER SEARCH ---
+# --- ROLE ---
 @router.message(EmployerSearch.entering_role)
 async def handle_search_role(message: types.Message, state: FSMContext):
     await state.update_data(role=message.text)
     await state.set_state(EmployerSearch.entering_must_skills)
     await message.answer("<b>Шаг 2/5:</b> Какие ключевые навыки и технологии обязательны? (через запятую)")
 
+# --- SKILLS ---
 @router.message(EmployerSearch.entering_must_skills)
 async def handle_search_skills(message: types.Message, state: FSMContext):
     skills = [s.strip().lower() for s in message.text.split(',')]
     await state.update_data(must_skills=skills)
     await state.set_state(EmployerSearch.entering_nice_skills)
     await message.answer("<b>Шаг 3/5:</b> Какие навыки желательны, но не обязательны? (через запятую, или /skip)")
-
 
 @router.message(Command("skip"), EmployerSearch.entering_nice_skills)
 @router.message(EmployerSearch.entering_nice_skills)
@@ -78,7 +101,7 @@ async def handle_nice_skills(message: types.Message, state: FSMContext):
     await state.set_state(EmployerSearch.entering_experience)
     await message.answer("<b>Шаг 4/5:</b> Какой минимальный и максимальный опыт требуется? (например, 2-5)")
 
-
+# --- EXPERIENCE YEARS ---
 @router.message(EmployerSearch.entering_experience)
 async def handle_search_experience(message: types.Message, state: FSMContext):
     try:
@@ -93,7 +116,7 @@ async def handle_search_experience(message: types.Message, state: FSMContext):
     await state.set_state(EmployerSearch.entering_location_and_work_modes)
     await message.answer("<b>Шаг 5/5:</b> Укажите желаемую локацию и форматы работы. (например, EU remote, или /skip)")
 
-
+# --- LOCATION AND START ---
 @router.message(Command("skip"), EmployerSearch.entering_location_and_work_modes)
 @router.message(EmployerSearch.entering_location_and_work_modes)
 async def handle_location_and_start_search(message: types.Message, state: FSMContext):
@@ -101,13 +124,15 @@ async def handle_location_and_start_search(message: types.Message, state: FSMCon
         await state.update_data(location_query=message.text)
 
     await message.answer("💾 Сохранил. Начинаю поиск кандидатов...", reply_markup=types.ReplyKeyboardRemove())
-    filters = await state.get_data()
 
     employer_profile = await employer_api_client.get_or_create_employer(message.from_user.id, message.from_user.username)
     if not employer_profile:
         await message.answer("❌ Не удалось создать ваш профиль работодателя. Поиск отменен.")
         await state.clear()
         return
+    await state.update_data(employer_profile=employer_profile)
+
+    filters = await state.get_data()
 
     search_session = await employer_api_client.create_search_session(employer_profile['id'], filters)
     if not search_session:
@@ -131,7 +156,6 @@ async def handle_location_and_start_search(message: types.Message, state: FSMCon
     await message.answer(f"✅ Найдено кандидатов: {len(candidate_ids)}. Показываю первого:")
     await show_candidate_profile(message, state, session_id)
 
-
 async def process_next_candidate(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     session_id = data.get("session_id")
@@ -146,6 +170,7 @@ async def process_next_candidate(callback: types.CallbackQuery, state: FSMContex
     await show_candidate_profile(callback, state, session_id)
     await callback.answer()
 
+# --- DECISION ---
 @router.callback_query(SearchResultDecision.filter(), EmployerSearch.showing_results)
 async def handle_decision(callback: types.CallbackQuery, callback_data: SearchResultDecision, state: FSMContext):
     data = await state.get_data()
@@ -173,23 +198,19 @@ async def handle_decision(callback: types.CallbackQuery, callback_data: SearchRe
         await callback.answer("Выбор сохранен.")
         await process_next_candidate(callback, state)
 
-
+# --- NEXT ---
 @router.callback_query(SearchResultAction.filter(F.action == "next"), EmployerSearch.showing_results)
 async def handle_next_candidate(callback: types.CallbackQuery, state: FSMContext):
     await process_next_candidate(callback, state)
 
-
+# --- CONTACTS ---
 @router.callback_query(SearchResultAction.filter(F.action == "contact"), EmployerSearch.showing_results)
 async def handle_show_contact(callback: types.CallbackQuery, callback_data: SearchResultAction, state: FSMContext):
     data = await state.get_data()
     employer_profile = data.get('employer_profile')
     if not employer_profile:
-        profile = await employer_api_client.get_or_create_employer(callback.from_user.id, callback.from_user.username)
-        if not profile:
-            await callback.answer("Не удалось получить ваш профиль работодателя. Попробуйте снова.", show_alert=True)
-            return
-        await state.update_data(employer_profile=profile)
-        employer_profile = profile
+        await callback.answer("Ошибка сессии: профиль работодателя не найден. Начните поиск заново.", show_alert=True)
+        return
 
     await callback.answer("Запрашиваю контакты...", show_alert=False)
 
@@ -209,12 +230,22 @@ async def handle_show_contact(callback: types.CallbackQuery, callback_data: Sear
     else:
         await callback.message.answer("🤷‍♂️ Кандидат ограничил доступ к своим контактам.")
 
-
+# --- RESUME ---
 @router.callback_query(SearchResultAction.filter(F.action == "get_resume"), EmployerSearch.showing_results)
-async def handle_get_resume(callback: types.CallbackQuery, callback_data: SearchResultAction):
-    await callback.answer("Запрашиваю ссылку...")
+async def handle_get_resume(callback: types.CallbackQuery, callback_data: SearchResultAction, state: FSMContext):
+    await callback.answer("Запрашиваю профиль...")
 
-    link = await candidate_api_client.get_resume_download_link(callback_data.candidate_id)
+    profile = await candidate_api_client.get_candidate(callback_data.candidate_id)
+
+    if not profile or not profile.get("resumes"):
+        await callback.message.answer("У этого кандидата нет загруженного резюме.")
+        return
+
+    file_id = profile["resumes"][0]["file_id"]
+
+    await callback.answer("Запрашиваю ссылку на файл...")
+
+    link = await file_api_client.get_download_url_by_file_id(file_id)
 
     if link:
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
@@ -225,4 +256,4 @@ async def handle_get_resume(callback: types.CallbackQuery, callback_data: Search
             reply_markup=keyboard
         )
     else:
-        await callback.message.answer("Не удалось получить ссылку на резюме. Возможно, кандидат удалил его.")
+        await callback.message.answer("Не удалось получить ссылку на резюме. Сервис файлов может быть недоступен.")
