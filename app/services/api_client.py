@@ -92,29 +92,29 @@ class CandidateAPIClient:
     ) -> bool:
         url = f"{self.base_url}by-telegram/{telegram_id}"
 
-        payload = {
-            "display_name": profile_data.get("display_name"),
-            "headline_role": profile_data.get("headline_role"),
-            "experience_years": profile_data.get("experience_years"),
-            "location": profile_data.get("location"),
-            "work_modes": profile_data.get("work_modes", []),
-        }
-
+        payload = {}
+        if "display_name" in profile_data:
+            payload["display_name"] = profile_data["display_name"]
+        if "headline_role" in profile_data:
+            payload["headline_role"] = profile_data["headline_role"]
+        if "experience_years" in profile_data:
+            payload["experience_years"] = profile_data["experience_years"]
+        if "location" in profile_data:
+            payload["location"] = profile_data["location"]
+        if "work_modes" in profile_data:
+            payload["work_modes"] = profile_data["work_modes"]
         if "skills" in profile_data:
-            raw_skills = profile_data.get("skills", [])
+            raw_skills = profile_data["skills"]
             if raw_skills and isinstance(raw_skills[0], dict):
                 payload["skills"] = raw_skills
             else:
                 payload["skills"] = [{"skill": s, "kind": "hard"} for s in raw_skills]
-
         if "projects" in profile_data:
-            raw_projects = profile_data.get("projects", [])
+            raw_projects = profile_data["projects"]
             if raw_projects and isinstance(raw_projects[0], dict):
                 payload["projects"] = raw_projects
             else:
                 payload["projects"] = [{"title": p} for p in raw_projects]
-
-        payload = {k: v for k, v in payload.items() if v is not None}
 
         async with httpx.AsyncClient(
             http2=False, trust_env=False, timeout=10.0
@@ -138,7 +138,7 @@ class CandidateAPIClient:
     async def replace_resume(self, telegram_id: int, file_id: UUID) -> bool:
         url = f"{self.base_url}by-telegram/{telegram_id}/resume"
         payload = {"file_id": str(file_id)}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
             try:
                 response = await client.put(url, json=payload)
                 response.raise_for_status()
@@ -154,6 +154,43 @@ class CandidateAPIClient:
                 return response.json().get("download_url")
             except (httpx.RequestError, httpx.HTTPStatusError):
                 return None
+
+    async def replace_avatar(self, telegram_id: int, file_id: UUID) -> bool:
+        url = f"{self.base_url}by-telegram/{telegram_id}/avatar"
+        payload = {"file_id": str(file_id)}
+        async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
+            try:
+                response = await client.put(url, json=payload)
+                response.raise_for_status()
+                logger.info(f"Successfully replaced avatar for telegram_id {telegram_id}")
+                return True
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                logger.error(f"CandidateAPI: Error replacing avatar: {e}")
+                return False
+
+    async def delete_avatar(self, telegram_id: int) -> bool:
+        url = f"{self.base_url}by-telegram/{telegram_id}/avatar"
+        async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
+            try:
+                response = await client.delete(url)
+                response.raise_for_status()
+                logger.info(f"Deleted avatar for telegram_id {telegram_id}")
+                return True
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                logger.error(f"Error deleting avatar: {e}")
+                return False
+
+    async def delete_resume(self, telegram_id: int) -> bool:
+        url = f"{self.base_url}by-telegram/{telegram_id}/resume"
+        async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
+            try:
+                response = await client.delete(url)
+                response.raise_for_status()
+                logger.info(f"Deleted resume for telegram_id {telegram_id}")
+                return True
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                logger.error(f"Error deleting resume: {e}")
+                return False
 
 # --- EMPLOYER ---
 class EmployerAPIClient:

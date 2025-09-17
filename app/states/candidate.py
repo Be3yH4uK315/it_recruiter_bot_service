@@ -5,38 +5,32 @@ class CandidateRegistration(StatesGroup):
     entering_display_name = State()
     entering_headline_role = State()
     entering_experience_years = State()
-    entering_skills = State()
-    entering_location = State()
-
     adding_skill_name = State()
     adding_skill_kind = State()
     adding_skill_level = State()
     confirm_add_another_skill = State()
-
     confirm_start_adding_projects = State()
     adding_project_title = State()
     adding_project_description = State()
     adding_project_links = State()
     confirm_add_another_project = State()
-
+    entering_location = State()
     entering_work_modes = State()
     uploading_resume = State()
-    confirming_profile = State()
+    uploading_avatar = State()
+    confirm_skip_avatar = State()
 
 class CandidateProfileEdit(StatesGroup):
     choosing_field = State()
     editing_field = State()
-
-    editing_skills_start = State()
     editing_skill_name = State()
     editing_skill_kind = State()
     editing_skill_level = State()
     confirm_edit_another_skill = State()
-
-    editing_projects_start = State()
     editing_project_title = State()
     editing_project_description = State()
     editing_project_links = State()
     confirm_edit_another_project = State()
-
     editing_work_modes = State()
+    uploading_resume = State()
+    uploading_avatar = State()

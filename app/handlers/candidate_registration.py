@@ -17,7 +17,7 @@ router = Router()
 async def handle_display_name(message: types.Message, state: FSMContext):
     await state.update_data(display_name=message.text)
     await message.answer(
-        "<b>Шаг 2/8:</b> Приятно познакомиться! Теперь введите вашу основную должность (например, Python Backend Developer):"
+        "<b>Шаг 2/9:</b> Приятно познакомиться! Теперь введите вашу основную должность (например, Python Backend Developer):"
     )
 
     await state.set_state(CandidateRegistration.entering_headline_role)
@@ -27,7 +27,7 @@ async def handle_display_name(message: types.Message, state: FSMContext):
 async def handle_headline_role(message: types.Message, state: FSMContext):
     await state.update_data(headline_role=message.text)
     await message.answer(
-        "<b>Шаг 3/8:</b> Отлично! Теперь укажите ваш опыт работы в годах (например, 3.5):"
+        "<b>Шаг 3/9:</b> Отлично! Теперь укажите ваш опыт работы в годах (например, 3.5):"
     )
     await state.set_state(CandidateRegistration.entering_experience_years)
 
@@ -39,7 +39,7 @@ async def handle_experience_years(message: types.Message, state: FSMContext):
         await state.update_data(experience_years=experience)
         await state.update_data(skills=[], projects=[])
         await message.answer(
-            "<b>Шаг 4/8: Блок навыков.</b>\n\n"
+            "<b>Шаг 4/9: Блок навыков.</b>\n\n"
             "Давайте добавим ваш первый навык. Введите его название (например, Python):"
         )
         await state.set_state(CandidateRegistration.adding_skill_name)
@@ -90,7 +90,7 @@ async def handle_confirm_add_skill(callback: types.CallbackQuery, callback_data:
         await state.set_state(CandidateRegistration.adding_skill_name)
     else:
         await callback.message.edit_text(
-            "<b>Шаг 5/8: Блок проектов.</b>\n\n"
+            "<b>Шаг 5/9: Блок проектов.</b>\n\n"
             "Хотите добавить проекты/портфолио в свой профиль?",
             reply_markup=get_confirmation_keyboard(step="start_project")
         )
@@ -166,7 +166,7 @@ async def handle_confirm_add_project(callback: types.CallbackQuery, callback_dat
 
 # --- LOCATION ---
 async def ask_for_location(message: types.Message, state: FSMContext):
-    await message.answer("<b>Шаг 6/8:</b> Укажите вашу текущую локацию (например, Москва или EU):")
+    await message.answer("<b>Шаг 6/9:</b> Укажите вашу текущую локацию (например, Москва или EU):")
     await state.set_state(CandidateRegistration.entering_location)
 
 @router.message(CandidateRegistration.entering_location)
@@ -174,7 +174,7 @@ async def handle_location(message: types.Message, state: FSMContext):
     await state.update_data(location=message.text)
     await state.update_data(work_modes=[])
     await message.answer(
-        "<b>Шаг 7/8:</b> Выберите желаемые форматы работы:",
+        "<b>Шаг 7/9:</b> Выберите желаемые форматы работы:",
         reply_markup=get_work_modes_keyboard()
     )
     await state.set_state(CandidateRegistration.entering_work_modes)
@@ -195,17 +195,21 @@ async def handle_work_mode_selection(callback: types.CallbackQuery, callback_dat
 
 @router.callback_query(WorkModeCallback.filter(F.mode == "done"), CandidateRegistration.entering_work_modes)
 async def handle_work_mode_done(callback: types.CallbackQuery, state: FSMContext):
+    telegram_id = callback.from_user.id
+    print(f"handle_work_mode_done called with telegram_id={telegram_id}")
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer(
-        "<b>Шаг 8/8:</b> Отлично! Теперь загрузите ваше резюме в формате PDF или DOCX (до 10 МБ).\n"
+        "<b>Шаг 8/9:</b> Отлично! Теперь загрузите ваше резюме в формате PDF или DOCX (до 10 МБ).\n"
         "Если резюме пока нет, можете пропустить этот шаг, отправив команду /skip."
     )
     await state.set_state(CandidateRegistration.uploading_resume)
+    await callback.answer()
 
 # --- RESUME ---
 @router.message(F.document, CandidateRegistration.uploading_resume)
-async def handle_resume_upload(message: types.Message, state: FSMContext):  # bot или message.bot
+async def handle_resume_upload(message: types.Message, state: FSMContext):
     user_telegram_id = message.from_user.id
+    print(f"handle_resume_upload called with telegram_id={user_telegram_id}")
 
     await message.answer("Загружаю ваше резюме...")
     file_info = await message.bot.get_file(message.document.file_id)
@@ -246,15 +250,18 @@ async def handle_resume_upload(message: types.Message, state: FSMContext):  # bo
 
     if profile_success:
         await message.answer(
-            "✅ Ваш профиль успешно создан/обновлен!\n\n"
-            "Вы всегда можете его дополнить, используя команду /profile.")
+            "<b>Шаг 9/9:</b> Загрузите аватарку (фото, до 5 МБ).\n"
+            "Если хотите пропустить, отправьте /skip."
+        )
+        await state.set_state(CandidateRegistration.uploading_avatar)
     else:
         await message.answer("❌ Произошла ошибка при обновлении данных профиля.")
-
-    await state.clear()
+        await state.clear()
 
 @router.message(Command("skip"), CandidateRegistration.uploading_resume)
 async def handle_skip_resume(message: types.Message, state: FSMContext):
+    user_telegram_id = message.from_user.id
+    print(f"handle_skip_resume called with telegram_id={user_telegram_id}")
     await message.answer("Хорошо, вы сможете загрузить резюме позже через команду /profile.")
 
     user_data = await state.get_data()
@@ -266,14 +273,69 @@ async def handle_skip_resume(message: types.Message, state: FSMContext):
 
     if profile_success:
         await message.answer(
-            "✅ Ваш профиль успешно создан/обновлен!\n\n"
-            "Вы всегда можете его дополнить, используя команду /profile."
+            "<b>Шаг 9/9:</b> Загрузите аватарку (фото, до 5 МБ).\n"
+            "Если хотите пропустить, отправьте /skip."
         )
+        await state.set_state(CandidateRegistration.uploading_avatar)
     else:
         await message.answer(
             "❌ Произошла ошибка при обновлении профиля. Попробуйте позже."
         )
+        await state.clear()
 
+# --- AVATAR ---
+@router.message(F.photo, CandidateRegistration.uploading_avatar)
+async def handle_avatar_upload(message: types.Message, state: FSMContext):
+    user_telegram_id = message.from_user.id
+    print(f"handle_avatar_upload (registration) called with telegram_id={user_telegram_id}")
+
+    await message.answer("Обрабатываю фото...")
+
+    photo = message.photo[-1]
+    file_info = await message.bot.get_file(photo.file_id)
+    file_data = await message.bot.download_file(file_info.file_path)
+
+    extension = file_info.file_path.split('.')[-1].lower()
+    content_type = 'image/jpeg' if extension in ['jpg', 'jpeg'] else 'image/png' if extension == 'png' else 'image/jpeg'
+    filename = f"{photo.file_unique_id}.{extension}"
+
+    file_response = await file_api_client.upload_file(
+        filename=filename,
+        file_data=file_data.read(),
+        content_type=content_type,
+        owner_id=user_telegram_id,
+        file_type='avatar'
+    )
+    if not file_response:
+        await message.answer("❌ Ошибка при загрузке фото. Попробуйте снова.")
+        return
+
+    new_file_id = file_response['id']
+    success = await candidate_api_client.replace_avatar(
+        telegram_id=user_telegram_id,
+        file_id=new_file_id
+    )
+
+    if success:
+        await message.answer(
+            "✅ Ваш профиль успешно создан/обновлен с аватаркой!\n\n"
+            "Вы всегда можете его дополнить, используя команду /profile."
+        )
+    else:
+        await message.answer(
+            "❌ Произошла ошибка при обновлении аватара. Профиль сохранён без аватарки."
+        )
+
+    await state.clear()
+
+@router.message(Command("skip"), CandidateRegistration.uploading_avatar)
+async def handle_skip_avatar(message: types.Message, state: FSMContext):
+    user_telegram_id = message.from_user.id
+    print(f"handle_skip_avatar called with telegram_id={user_telegram_id}")
+    await message.answer(
+        "✅ Ваш профиль успешно создан/обновлен без аватарки!\n\n"
+        "Вы всегда можете добавить аватарку через команду /profile."
+    )
     await state.clear()
 
 # --- CANCEL ---

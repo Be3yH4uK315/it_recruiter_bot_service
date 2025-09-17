@@ -71,11 +71,16 @@ def get_work_modes_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def get_profile_actions_keyboard() -> InlineKeyboardMarkup:
+def get_profile_actions_keyboard(has_avatar: bool = False, has_resume: bool = False) -> InlineKeyboardMarkup:
     keyboard = [
+        [InlineKeyboardButton(text="🖼️ Сменить аватар", callback_data=ProfileAction(action="upload_avatar").pack())],
         [InlineKeyboardButton(text="✏️ Редактировать профиль", callback_data=ProfileAction(action="edit").pack())],
         [InlineKeyboardButton(text="📄 Загрузить/обновить резюме", callback_data=ProfileAction(action="upload_resume").pack())]
     ]
+    if has_avatar:
+        keyboard.append([InlineKeyboardButton(text="🗑️ Удалить аватарку", callback_data=ProfileAction(action="delete_avatar").pack())])
+    if has_resume:
+        keyboard.append([InlineKeyboardButton(text="🗑️ Удалить резюме", callback_data=ProfileAction(action="delete_resume").pack())])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_initial_search_keyboard(candidate_id: str, has_resume: bool) -> InlineKeyboardMarkup:
@@ -128,14 +133,15 @@ def get_liked_candidate_keyboard(candidate_id: str) -> InlineKeyboardMarkup:
 def get_profile_edit_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
         [
+            InlineKeyboardButton(text="Аватарка", callback_data=EditFieldCallback(field_name="avatar").pack()),
             InlineKeyboardButton(text="ФИО", callback_data=EditFieldCallback(field_name="display_name").pack()),
-            InlineKeyboardButton(text="Должность", callback_data=EditFieldCallback(field_name="headline_role").pack()),        ],
-        [
-            InlineKeyboardButton(text="Навыки", callback_data=EditFieldCallback(field_name="skills").pack()),
-            InlineKeyboardButton(text="Опыт", callback_data=EditFieldCallback(field_name="experience_years").pack()),
         ],
         [
-            # InlineKeyboardButton(text="Навыки", callback_data=EditFieldCallback(field_name="skills").pack()),
+            InlineKeyboardButton(text="Должность", callback_data=EditFieldCallback(field_name="headline_role").pack()),
+            InlineKeyboardButton(text="Навыки", callback_data=EditFieldCallback(field_name="skills").pack()),
+        ],
+        [
+            InlineKeyboardButton(text="Опыт", callback_data=EditFieldCallback(field_name="experience_years").pack()),
             InlineKeyboardButton(text="Локация", callback_data=EditFieldCallback(field_name="location").pack()),
         ],
         [

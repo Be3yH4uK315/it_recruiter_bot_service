@@ -15,7 +15,7 @@ def format_candidate_profile(profile: Dict[str, Any]) -> str:
         f"<b>📌 Должность:</b> {profile.get('headline_role', 'Не указано')}\n"
         f"<b>📈 Опыт:</b> {profile.get('experience_years', 'Не указан')} лет\n"
         f"<b>📍 Локация:</b> {profile.get('location', 'Не указана')}\n"
-        f"<b>💻 Форматы работы:</b> {', '.join(profile.get('work_modes', ['Не указаны']))}\n"
+        f"<b>💻 Форматы работы:</b> {', '.join(profile.get('work_modes') or ['Не указаны'])}\n"
     )
 
     skills = profile.get('skills', [])
@@ -43,17 +43,18 @@ def format_candidate_profile(profile: Dict[str, Any]) -> str:
 
     return text
 
-async def show_candidate_profile(message: types.Message, state: FSMContext, session_id: str):
+
+async def show_candidate_profile(message: types.Message | types.CallbackQuery, state: FSMContext, session_id: str):
     data = await state.get_data()
     idx = data.get('current_index', 0)
     candidate_ids = data.get('found_candidates', [])
 
+    target_message = message.message if isinstance(message, types.CallbackQuery) else message
+
     if not candidate_ids or idx >= len(candidate_ids):
+        await target_message.answer("Больше кандидатов по вашему запросу нет. Можете начать новый поиск /search.")
         if isinstance(message, types.CallbackQuery):
             await message.answer()
-            await message.message.answer("Больше кандидатов по вашему запросу нет. Можете начать новый поиск /search.")
-        else:
-            await message.answer("Больше кандидатов по вашему запросу нет. Можете начать новый поиск /search.")
         await state.clear()
         return
 
@@ -61,19 +62,34 @@ async def show_candidate_profile(message: types.Message, state: FSMContext, sess
     profile = await candidate_api_client.get_candidate(candidate_id)
 
     if not profile:
-        await message.answer("Не удалось загрузить профиль кандидата. Показываю следующего.")
+        await target_message.answer("Не удалось загрузить профиль кандидата. Показываю следующего.")
         await state.update_data(current_index=idx + 1)
         await show_candidate_profile(message, state, session_id)
         return
 
-    has_resume = bool(profile.get("resumes"))
+    avatar_url = None
+    if profile.get("avatars"):
+        avatar_file_id = profile["avatars"][0]["file_id"]
+        avatar_url = await file_api_client.get_download_url_by_file_id(avatar_file_id)
 
+    caption = format_candidate_profile(profile)
+    has_resume = bool(profile.get("resumes"))
     keyboard = get_initial_search_keyboard(candidate_id, has_resume)
 
-    if isinstance(message, types.CallbackQuery):
-        await message.message.answer(format_candidate_profile(profile), reply_markup=keyboard)
+    if avatar_url:
+        await target_message.answer_photo(
+            photo=avatar_url,
+            caption=caption,
+            reply_markup=keyboard
+        )
     else:
-        await message.answer(format_candidate_profile(profile), reply_markup=keyboard)
+        await target_message.answer(
+            text=caption,
+            reply_markup=keyboard
+        )
+
+    if isinstance(message, types.CallbackQuery):
+        await message.answer()
 
 # --- EMPLOYER SEARCH ---
 # --- ROLE ---

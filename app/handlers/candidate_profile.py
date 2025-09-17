@@ -4,41 +4,65 @@ from aiogram.types import Message, CallbackQuery
 from app.keyboards.inline import get_profile_actions_keyboard, ProfileAction, get_profile_edit_keyboard, \
     EditFieldCallback, get_work_modes_keyboard, WorkModeCallback, get_skill_kind_keyboard, SkillKindCallback, \
     get_skill_level_keyboard, SkillLevelCallback, get_confirmation_keyboard, ConfirmationCallback
-from app.services.api_client import candidate_api_client
+from app.services.api_client import candidate_api_client, file_api_client
 from aiogram.fsm.context import FSMContext
-from app.states.candidate import CandidateRegistration, CandidateProfileEdit
+from app.states.candidate import CandidateProfileEdit
 from app.handlers.employer_search import format_candidate_profile
 
 router = Router()
 
 # --- PROFILE ---
 @router.message(Command("profile"))
-async def cmd_profile(message: Message | CallbackQuery, state: FSMContext):
+async def cmd_profile(message: Message, state: FSMContext, telegram_id: int = None):
     await state.clear()
 
-    if isinstance(message, Message):
+    if isinstance(message, CallbackQuery):
+        target_message = message.message
         user_id = message.from_user.id
     else:
+        target_message = message
         user_id = message.from_user.id
-        message = message.message
 
     profile = await candidate_api_client.get_candidate_by_telegram_id(user_id)
 
     if not profile:
-        await message.answer(
-            "Ваш профиль не найден. Возможно, стоит начать с команды /start и зарегистрироваться как кандидат."
+        await target_message.answer(
+            "Ваш профиль не найден. Возможно, стоит начать с команды /start."
         )
         return
 
-    await message.answer("Ваш текущий профиль:")
-    await message.answer(
-        format_candidate_profile(profile),
-        reply_markup=get_profile_actions_keyboard()
-    )
+    await target_message.answer("Ваш текущий профиль:")
+
+    avatar_url = None
+    if profile.get("avatars"):
+        avatar_file_id = profile["avatars"][0]["file_id"]
+        avatar_url = await file_api_client.get_download_url_by_file_id(avatar_file_id)
+
+    caption = format_candidate_profile(profile)
+    has_avatar = bool(profile.get("avatars"))
+    has_resume = bool(profile.get("resumes"))
+    keyboard = get_profile_actions_keyboard(has_avatar=has_avatar, has_resume=has_resume)
+
+    if avatar_url:
+        await target_message.answer_photo(
+            photo=avatar_url,
+            caption=caption,
+            reply_markup=keyboard
+        )
+    else:
+        await target_message.answer(
+            text=caption,
+            reply_markup=keyboard
+        )
+
+    if isinstance(message, CallbackQuery):
+        await message.answer()
 
 # --- ACTION ---
 @router.callback_query(ProfileAction.filter())
 async def handle_profile_action(callback: CallbackQuery, callback_data: ProfileAction, state: FSMContext):
+    telegram_id = callback.from_user.id
+    print(f"handle_profile_action called with telegram_id={telegram_id}, action={callback_data.action}")
     if callback_data.action == "edit":
         await state.set_state(CandidateProfileEdit.choosing_field)
         await callback.message.edit_text(
@@ -46,12 +70,35 @@ async def handle_profile_action(callback: CallbackQuery, callback_data: ProfileA
             reply_markup=get_profile_edit_keyboard()
         )
     elif callback_data.action == "upload_resume":
-        await state.set_state(CandidateRegistration.uploading_resume)
+        await state.set_state(CandidateProfileEdit.uploading_resume)
         await callback.message.delete()
         await callback.message.answer(
             "Пожалуйста, загрузите ваше новое резюме (PDF/DOCX, до 10 МБ).\n"
             "Чтобы отменить, введите /cancel."
         )
+    elif callback_data.action == "upload_avatar":
+        await state.set_state(CandidateProfileEdit.uploading_avatar)
+        await callback.message.delete()
+        await callback.message.answer(
+            "Пожалуйста, отправьте фото, которое хотите установить как аватар.\n"
+            "Чтобы отменить, введите /cancel."
+        )
+    elif callback_data.action == "delete_avatar":
+        success = await candidate_api_client.delete_avatar(callback.from_user.id)
+        if success:
+            await callback.message.answer("✅ Аватарка удалена!")
+        else:
+            await callback.message.answer("❌ Ошибка при удалении аватарки.")
+        await callback.message.delete()
+        await cmd_profile(callback.message, state, telegram_id=telegram_id)
+    elif callback_data.action == "delete_resume":
+        success = await candidate_api_client.delete_resume(callback.from_user.id)
+        if success:
+            await callback.message.answer("✅ Резюме удалено!")
+        else:
+            await callback.message.answer("❌ Ошибка при удалении резюме.")
+        await callback.message.delete()
+        await cmd_profile(callback.message, state, telegram_id=telegram_id)
     await callback.answer()
 
 # --- CHOSEN ---
@@ -95,11 +142,17 @@ async def handle_field_chosen(callback: CallbackQuery, callback_data: EditFieldC
             reply_markup=get_work_modes_keyboard()
         )
 
+    elif field == "avatar":
+        await state.set_state(CandidateProfileEdit.uploading_avatar)
+        await callback.message.edit_text("Пожалуйста, отправьте фото для новой аватарки.")
+
     await callback.answer()
 
 # --- TXT VALUE ---
 @router.message(CandidateProfileEdit.editing_field)
 async def handle_new_value(message: Message, state: FSMContext):
+    telegram_id = message.from_user.id
+    print(f"handle_new_value called with telegram_id={telegram_id}")
     data = await state.get_data()
     field = data.get("field_to_edit")
     update_payload = {field: message.text}
@@ -250,9 +303,118 @@ async def handle_edit_work_mode_done(callback: CallbackQuery, state: FSMContext)
     await cmd_profile(callback, state)
     await callback.answer()
 
+# --- RESUME ---
+@router.message(F.document, CandidateProfileEdit.uploading_resume)
+async def handle_resume_upload(message: Message, state: FSMContext):
+    user_telegram_id = message.from_user.id
+    print(f"handle_resume_upload called with telegram_id={user_telegram_id}")
+
+    await message.answer("Обрабатываю резюме...")
+
+    document = message.document
+    if document.mime_type not in ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']:
+        await message.answer("❌ Пожалуйста, загрузите файл в формате PDF или DOCX.")
+        return
+    if document.file_size > 10 * 1024 * 1024:  # 10MB limit
+        await message.answer("❌ Файл слишком большой (максимум 10 МБ).")
+        return
+
+    file_info = await message.bot.get_file(document.file_id)
+    file_data = await message.bot.download_file(file_info.file_path)
+
+    old_file_id_to_delete = None
+    candidate_profile = await candidate_api_client.get_candidate_by_telegram_id(user_telegram_id)
+    if candidate_profile and candidate_profile.get("resumes"):
+        old_file_id_to_delete = candidate_profile["resumes"][0]["file_id"]
+
+    extension = document.file_name.split('.')[-1].lower()
+    content_type = 'application/pdf' if extension == 'pdf' else 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' if extension == 'docx' else 'application/pdf'
+    filename = document.file_name
+
+    file_response = await file_api_client.upload_file(
+        filename=filename,
+        file_data=file_data.read(),
+        content_type=content_type,
+        owner_id=user_telegram_id,
+        file_type='resume'
+    )
+
+    if not file_response:
+        await message.answer("❌ Ошибка при загрузке резюме. Попробуйте снова.")
+        return
+
+    new_file_id = file_response['id']
+    success = await candidate_api_client.replace_resume(
+        telegram_id=user_telegram_id,
+        file_id=new_file_id
+    )
+
+    if success:
+        await message.answer("✅ Резюме успешно обновлено!")
+        if old_file_id_to_delete:
+            await file_api_client.delete_file(old_file_id_to_delete, owner_telegram_id=user_telegram_id)
+            print(f"Old resume file {old_file_id_to_delete} deleted.")
+    else:
+        await message.answer("❌ Произошла ошибка при обновлении резюме.")
+
+    await state.clear()
+    await cmd_profile(message, state)
+
+# --- AVATAR ---
+@router.message(F.photo, CandidateProfileEdit.uploading_avatar)
+async def handle_avatar_upload(message: Message, state: FSMContext):
+    user_telegram_id = message.from_user.id
+    print(f"handle_avatar_upload called with telegram_id={user_telegram_id}")
+
+    await message.answer("Обрабатываю фото...")
+
+    photo = message.photo[-1]
+    file_info = await message.bot.get_file(photo.file_id)
+    file_data = await message.bot.download_file(file_info.file_path)
+
+    old_file_id_to_delete = None
+    candidate_profile = await candidate_api_client.get_candidate_by_telegram_id(user_telegram_id)
+    if candidate_profile and candidate_profile.get("avatars"):
+        old_file_id_to_delete = candidate_profile["avatars"][0]["file_id"]
+
+    extension = file_info.file_path.split('.')[-1].lower()
+    content_type = 'image/jpeg' if extension in ['jpg', 'jpeg'] else 'image/png' if extension == 'png' else 'image/jpeg'
+    filename = f"{photo.file_unique_id}.{extension}"
+
+    file_response = await file_api_client.upload_file(
+        filename=filename,
+        file_data=file_data.read(),
+        content_type=content_type,
+        owner_id=user_telegram_id,
+        file_type='avatar'
+    )
+
+    if not file_response:
+        await message.answer("❌ Ошибка при загрузке фото. Попробуйте снова.")
+        return
+
+    new_file_id = file_response['id']
+    success = await candidate_api_client.replace_avatar(
+        telegram_id=user_telegram_id,
+        file_id=new_file_id
+    )
+
+    if success:
+        await message.answer("✅ Аватар успешно обновлен!")
+        if old_file_id_to_delete:
+            await file_api_client.delete_file(old_file_id_to_delete, owner_telegram_id=user_telegram_id)
+            print(f"Old avatar file {old_file_id_to_delete} deleted.")
+    else:
+        await message.answer("❌ Произошла ошибка при обновлении аватара.")
+
+    await state.clear()
+    await cmd_profile(message, state)
+
 # --- BACK ---
 @router.callback_query(EditFieldCallback.filter(F.field_name == "back"), CandidateProfileEdit.choosing_field)
 async def handle_back_to_profile(callback: CallbackQuery, state: FSMContext):
+    telegram_id = callback.from_user.id
+    print(f"handle_back_to_profile called with telegram_id={telegram_id}")
     await state.clear()
     await callback.message.delete()
     await cmd_profile(callback.message, state)
