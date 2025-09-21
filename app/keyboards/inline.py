@@ -2,6 +2,10 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters.callback_data import CallbackData
 from typing import Literal
 
+# --- CONTACTS VISIBILITY ---
+class ContactsVisibilityCallback(CallbackData, prefix="vis"):
+    visibility: str
+
 # --- SKILLS ---
 class SkillKindCallback(CallbackData, prefix="skill_kind"):
     kind: str
@@ -58,15 +62,56 @@ def get_role_selection_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def get_work_modes_keyboard() -> InlineKeyboardMarkup:
+def get_contacts_visibility_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
         [
-            InlineKeyboardButton(text="Удаленно", callback_data=WorkModeCallback(mode="remote").pack()),
-            InlineKeyboardButton(text="Офис", callback_data=WorkModeCallback(mode="office").pack()),
-            InlineKeyboardButton(text="Гибрид", callback_data=WorkModeCallback(mode="hybrid").pack()),
+            InlineKeyboardButton(
+                text="По запросу (on_request)",
+                callback_data=ContactsVisibilityCallback(visibility="on_request").pack()
+            )
         ],
         [
-            InlineKeyboardButton(text="Готово", callback_data=WorkModeCallback(mode="done").pack())
+            InlineKeyboardButton(
+                text="Публичные (public)",
+                callback_data=ContactsVisibilityCallback(visibility="public").pack()
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Скрытые (hidden)",
+                callback_data=ContactsVisibilityCallback(visibility="hidden").pack()
+            )
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_work_modes_keyboard(selected: set[str] | None = None) -> InlineKeyboardMarkup:
+    if selected is None:
+        selected = set()
+
+    def label(text: str, mode: str) -> str:
+        return f"✅ {text}" if mode in selected else text
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                text=label("Удаленно", "remote"),
+                callback_data=WorkModeCallback(mode="remote").pack()
+            ),
+            InlineKeyboardButton(
+                text=label("Офис", "office"),
+                callback_data=WorkModeCallback(mode="office").pack()
+            ),
+            InlineKeyboardButton(
+                text=label("Гибрид", "hybrid"),
+                callback_data=WorkModeCallback(mode="hybrid").pack()
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="Готово",
+                callback_data=WorkModeCallback(mode="done").pack()
+            )
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -141,12 +186,15 @@ def get_profile_edit_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Навыки", callback_data=EditFieldCallback(field_name="skills").pack()),
         ],
         [
-            InlineKeyboardButton(text="Опыт", callback_data=EditFieldCallback(field_name="experience_years").pack()),
+            InlineKeyboardButton(text="Опыт работы", callback_data=EditFieldCallback(field_name="experiences").pack()),
             InlineKeyboardButton(text="Локация", callback_data=EditFieldCallback(field_name="location").pack()),
         ],
         [
             InlineKeyboardButton(text="Формат работы", callback_data=EditFieldCallback(field_name="work_modes").pack()),
             InlineKeyboardButton(text="Проекты", callback_data=EditFieldCallback(field_name="projects").pack()),
+        ],
+        [
+            InlineKeyboardButton(text="📞 Контакты", callback_data=EditFieldCallback(field_name="contacts").pack()),
         ],
         [
             InlineKeyboardButton(text="⬅️ Назад", callback_data=EditFieldCallback(field_name="back").pack())

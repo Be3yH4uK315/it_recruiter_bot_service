@@ -6,16 +6,14 @@ from app.services.api_client import candidate_api_client
 from aiogram.fsm.context import FSMContext
 from app.states.candidate import CandidateRegistration
 from app.states.employer import EmployerSearch
+from app.core.messages import Messages
 
 router = Router()
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer(
-        "👋 Добро пожаловать в IT Recruiter Bot!\n\n"
-        "Я помогу вам найти работу или подобрать специалиста в IT.\n\n"
-        "Пожалуйста, выберите вашу роль:",
+    await message.answer(Messages.Common.START,
         reply_markup=get_role_selection_keyboard(),
     )
 
@@ -29,24 +27,15 @@ async def cq_select_candidate(callback: CallbackQuery, state: FSMContext):
     )
 
     await state.set_state(CandidateRegistration.entering_display_name)
-    await callback.message.edit_text(
-        "Отлично! Давайте начнем с вашего профиля.\n\n"
-        "<b>Шаг 1/7:</b> Пожалуйста, введите ваши Фамилию и Имя:"
-    )
+    await callback.message.edit_text(Messages.CandidateRegistration.STEP_1)
 
 @router.callback_query(RoleCallback.filter(F.role_name == "employer"))
 async def cq_select_employer(callback: CallbackQuery, state: FSMContext):
     await state.set_state(EmployerSearch.entering_role)
-    await callback.message.edit_text(
-        "Отлично! Начинаем поиск кандидатов.\n\n"
-        "<b>Шаг 1/5:</b> Какую должность вы ищете? (например, Frontend Developer)"
-    )
+    await callback.message.edit_text(Messages.EmployerSearch.STEP_1)
     await callback.answer()
 
 @router.message(Command("search"))
 async def cmd_search(message: Message, state: FSMContext):
     await state.set_state(EmployerSearch.entering_role)
-    await message.answer(
-        "Начинаем новый поиск кандидатов.\n\n"
-        "<b>Шаг 1/5:</b> Какую должность вы ищете? (например, Frontend Developer)"
-    )
+    await message.answer(Messages.EmployerSearch.STEP_1)

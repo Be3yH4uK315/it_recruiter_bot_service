@@ -12,10 +12,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- CANDIDATE ---
+# --- КЛИЕНТ ДЛЯ CANDIDATE SERVICE ---
 class CandidateAPIClient:
     def __init__(self):
-        self.base_url = f"{CANDIDATE_SERVICE_URL}/candidates/"
+        self.base_url = f"{CANDIDATE_SERVICE_URL}/candidates"
 
     async def create_candidate(
         self, telegram_id: int, telegram_name: str
@@ -33,7 +33,7 @@ class CandidateAPIClient:
             http2=False, trust_env=False, timeout=10.0
         ) as client:
             try:
-                response = await client.post(self.base_url, json=payload)
+                response = await client.post(f"{self.base_url}/", json=payload)
 
                 if response.status_code == 409:
                     logger.info(
@@ -59,7 +59,7 @@ class CandidateAPIClient:
     async def get_candidate_by_telegram_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
             try:
-                response = await client.get(f"{self.base_url}by-telegram/{telegram_id}")
+                response = await client.get(f"{self.base_url}/by-telegram/{telegram_id}")
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
@@ -77,7 +77,7 @@ class CandidateAPIClient:
             http2=False, trust_env=False, timeout=10.0
         ) as client:
             try:
-                response = await client.get(f"{self.base_url}{candidate_id}")
+                response = await client.get(f"{self.base_url}/{candidate_id}")
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
@@ -90,31 +90,9 @@ class CandidateAPIClient:
     async def update_candidate_profile(
         self, telegram_id: int, profile_data: dict
     ) -> bool:
-        url = f"{self.base_url}by-telegram/{telegram_id}"
+        url = f"{self.base_url}/by-telegram/{telegram_id}"
 
-        payload = {}
-        if "display_name" in profile_data:
-            payload["display_name"] = profile_data["display_name"]
-        if "headline_role" in profile_data:
-            payload["headline_role"] = profile_data["headline_role"]
-        if "experience_years" in profile_data:
-            payload["experience_years"] = profile_data["experience_years"]
-        if "location" in profile_data:
-            payload["location"] = profile_data["location"]
-        if "work_modes" in profile_data:
-            payload["work_modes"] = profile_data["work_modes"]
-        if "skills" in profile_data:
-            raw_skills = profile_data["skills"]
-            if raw_skills and isinstance(raw_skills[0], dict):
-                payload["skills"] = raw_skills
-            else:
-                payload["skills"] = [{"skill": s, "kind": "hard"} for s in raw_skills]
-        if "projects" in profile_data:
-            raw_projects = profile_data["projects"]
-            if raw_projects and isinstance(raw_projects[0], dict):
-                payload["projects"] = raw_projects
-            else:
-                payload["projects"] = [{"title": p} for p in raw_projects]
+        payload = profile_data.copy()
 
         async with httpx.AsyncClient(
             http2=False, trust_env=False, timeout=10.0
@@ -136,7 +114,7 @@ class CandidateAPIClient:
                 return False
 
     async def replace_resume(self, telegram_id: int, file_id: UUID) -> bool:
-        url = f"{self.base_url}by-telegram/{telegram_id}/resume"
+        url = f"{self.base_url}/by-telegram/{telegram_id}/resume"
         payload = {"file_id": str(file_id)}
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
             try:
@@ -146,17 +124,8 @@ class CandidateAPIClient:
             except (httpx.RequestError, httpx.HTTPStatusError):
                 return False
 
-    async def get_resume_download_link(self, candidate_id: str) -> Optional[str]:
-        async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
-            try:
-                response = await client.get(f"{self.base_url}{candidate_id}/resume")
-                response.raise_for_status()
-                return response.json().get("download_url")
-            except (httpx.RequestError, httpx.HTTPStatusError):
-                return None
-
     async def replace_avatar(self, telegram_id: int, file_id: UUID) -> bool:
-        url = f"{self.base_url}by-telegram/{telegram_id}/avatar"
+        url = f"{self.base_url}/by-telegram/{telegram_id}/avatar"
         payload = {"file_id": str(file_id)}
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
             try:
@@ -169,7 +138,7 @@ class CandidateAPIClient:
                 return False
 
     async def delete_avatar(self, telegram_id: int) -> bool:
-        url = f"{self.base_url}by-telegram/{telegram_id}/avatar"
+        url = f"{self.base_url}/by-telegram/{telegram_id}/avatar"
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
             try:
                 response = await client.delete(url)
@@ -181,7 +150,7 @@ class CandidateAPIClient:
                 return False
 
     async def delete_resume(self, telegram_id: int) -> bool:
-        url = f"{self.base_url}by-telegram/{telegram_id}/resume"
+        url = f"{self.base_url}/by-telegram/{telegram_id}/resume"
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
             try:
                 response = await client.delete(url)
@@ -195,7 +164,7 @@ class CandidateAPIClient:
 # --- EMPLOYER ---
 class EmployerAPIClient:
     def __init__(self):
-        self.base_url = f"{EMPLOYER_SERVICE_URL}/employers/"
+        self.base_url = f"{EMPLOYER_SERVICE_URL}/employers"
 
     async def get_or_create_employer(self, telegram_id: int, username: str) -> Optional[Dict[str, Any]]:
         payload = {"telegram_id": telegram_id, "contacts": {"telegram": f"@{username}"}}
@@ -219,7 +188,7 @@ class EmployerAPIClient:
             http2=False, trust_env=False, timeout=10.0
         ) as client:
             try:
-                response = await client.post(f"{self.base_url}{employer_id}/searches", json=payload)
+                response = await client.post(f"{self.base_url}/{employer_id}/searches", json=payload)
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
@@ -230,7 +199,7 @@ class EmployerAPIClient:
                 return None
 
     async def save_decision(self, session_id: str, candidate_id: str, decision: str) -> bool:
-        url = f"{self.base_url}searches/{session_id}/decisions"
+        url = f"{self.base_url}/searches/{session_id}/decisions"
         payload = {"candidate_id": candidate_id, "decision": decision}
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
             try:
@@ -246,7 +215,7 @@ class EmployerAPIClient:
                 return False
 
     async def request_contacts(self, employer_id: str, candidate_id: str) -> Optional[Dict[str, Any]]:
-        url = f"{self.base_url}{employer_id}/contact-requests"
+        url = f"{self.base_url}/{employer_id}/contact-requests"
         payload = {"candidate_id": candidate_id}
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=10.0) as client:
             try:
@@ -263,24 +232,16 @@ class EmployerAPIClient:
 # --- SEARCH ---
 class SearchAPIClient:
     def __init__(self):
-        self.base_url = f"{SEARCH_SERVICE_URL}/search/"
+        self.base_url = f"{SEARCH_SERVICE_URL}/search"
 
-    async def search_candidates(self, filters: dict, exclude_ids: List[str] = None) -> Optional[List[Dict[str, Any]]]:
-        payload = filters.copy()
-        payload['exclude_ids'] = exclude_ids
-
-        async with httpx.AsyncClient(
-            http2=False, trust_env=False, timeout=10.0
-        ) as client:
+    async def search_candidates(self, filters: dict) -> Optional[Dict[str, Any]]:
+        async with httpx.AsyncClient() as client:
             try:
-                response = await client.post(self.base_url, json=payload)
+                response = await client.post(self.base_url, json=filters)
                 response.raise_for_status()
-                return response.json().get("results", [])
-            except httpx.HTTPStatusError as e:
-                logger.error(f"SearchAPI: HTTP error during search: {e.response.status_code}")
-                return None
-            except httpx.RequestError as e:
-                logger.error(f"SearchAPI: Request error during search: {e}")
+                return response.json()
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                logger.error(f"SearchAPI: Error during search: {e}")
                 return None
 
 # --- FILE ---

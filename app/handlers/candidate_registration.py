@@ -1,67 +1,233 @@
-from aiogram import Router, F, types
+import re
+from urllib.parse import urlparse
+from datetime import datetime, date
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from app.states.candidate import CandidateRegistration
 from app.services.api_client import candidate_api_client, file_api_client
 from app.keyboards.inline import (
     get_work_modes_keyboard, WorkModeCallback,
     get_skill_kind_keyboard, SkillKindCallback,
     get_skill_level_keyboard, SkillLevelCallback,
-    get_confirmation_keyboard, ConfirmationCallback
+    get_confirmation_keyboard, ConfirmationCallback,
+    get_contacts_visibility_keyboard, ContactsVisibilityCallback,
 )
+from app.core.messages import Messages
 
 router = Router()
 
-# --- DISPALY NAME ---
-@router.message(CandidateRegistration.entering_display_name)
-async def handle_display_name(message: types.Message, state: FSMContext):
-    await state.update_data(display_name=message.text)
-    await message.answer(
-        "<b>Шаг 2/9:</b> Приятно познакомиться! Теперь введите вашу основную должность (например, Python Backend Developer):"
-    )
+# Валидация URL
+def is_valid_url(url: str) -> bool:
+    try:
+        result = urlparse(url)
+        return all([result.scheme, result.netloc])
+    except ValueError:
+        return False
 
+# =============================================================================
+# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ НАВИГАЦИИ ПО АНКЕТЕ ===
+# =============================================================================
+
+async def _ask_for_experience(message: Message, state: FSMContext):
+    await state.update_data(experiences=[])
+    await message.answer(
+        Messages.CandidateRegistration.STEP_3,
+        reply_markup=get_confirmation_keyboard(step="start_exp")
+    )
+    await state.set_state(CandidateRegistration.confirm_start_adding_experience)
+
+async def _ask_for_skills(message: Message, state: FSMContext):
+    await state.update_data(skills=[])
+    await message.answer(Messages.CandidateRegistration.STEP_4)
+    await state.set_state(CandidateRegistration.adding_skill_name)
+
+async def _ask_for_projects(message: Message, state: FSMContext):
+    await state.update_data(projects=[])
+    await message.answer(
+        Messages.CandidateRegistration.STEP_5,
+        reply_markup=get_confirmation_keyboard(step="start_project")
+    )
+    await state.set_state(CandidateRegistration.confirm_start_adding_projects)
+
+async def _ask_for_location(message: Message, state: FSMContext):
+    await message.answer(Messages.CandidateRegistration.STEP_6)
+    await state.set_state(CandidateRegistration.entering_location)
+
+async def _ask_for_contacts(message: Message, state: FSMContext):
+    await message.answer(Messages.CandidateRegistration.STEP_8)
+    await state.set_state(CandidateRegistration.entering_contacts)
+
+async def _ask_for_visibility(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if not data.get("contacts"):
+        await state.update_data(contacts_visibility="hidden")
+        await _ask_for_resume(message, state)
+        return
+    await message.answer(
+        Messages.CandidateRegistration.STEP_9,
+        reply_markup=get_contacts_visibility_keyboard()
+    )
+    await state.set_state(CandidateRegistration.choosing_contacts_visibility)
+
+async def _ask_for_resume(message: Message, state: FSMContext):
+    await message.answer(Messages.CandidateRegistration.STEP_10)
+    await state.set_state(CandidateRegistration.uploading_resume)
+
+async def _ask_for_avatar(message: Message, state: FSMContext):
+    await message.answer(Messages.CandidateRegistration.STEP_11)
+    await state.set_state(CandidateRegistration.uploading_avatar)
+
+async def _finish_registration(message: Message, state: FSMContext):
+    user_data = await state.get_data()
+    telegram_id = message.from_user.id
+
+    if not user_data.get('display_name') or not user_data.get('headline_role'):
+        await message.answer(Messages.CandidateRegistration.FINISH_ERROR)
+        await state.clear()
+        return
+
+    if user_data.get("contacts") and not user_data.get("contacts_visibility"):
+        user_data["contacts_visibility"] = "on_request"
+
+    await message.answer(Messages.CandidateRegistration.FINISH_SAVING)
+
+    profile_success = await candidate_api_client.update_candidate_profile(telegram_id, user_data)
+
+    if profile_success:
+        await message.answer(Messages.CandidateRegistration.FINISH_OK)
+    else:
+        await message.answer(Messages.CandidateRegistration.FINISH_ERROR_SAVE)
+
+    await state.clear()
+
+# =============================================================================
+# === ХЕНДЛЕРЫ FSM (ШАГИ АНКЕТЫ) ===
+# =============================================================================
+
+# --- ШАГ 1: ФИО ---
+@router.message(CandidateRegistration.entering_display_name)
+async def handle_display_name(message: Message, state: FSMContext):
+    await state.update_data(display_name=message.text)
+    await message.answer(Messages.CandidateRegistration.STEP_2)
     await state.set_state(CandidateRegistration.entering_headline_role)
 
-# --- HEADLINE ROLE ---
+# --- ШАГ 2: Должность ---
 @router.message(CandidateRegistration.entering_headline_role)
-async def handle_headline_role(message: types.Message, state: FSMContext):
+async def handle_headline_role(message: Message, state: FSMContext):
     await state.update_data(headline_role=message.text)
-    await message.answer(
-        "<b>Шаг 3/9:</b> Отлично! Теперь укажите ваш опыт работы в годах (например, 3.5):"
-    )
-    await state.set_state(CandidateRegistration.entering_experience_years)
+    await _ask_for_experience(message, state)
 
-# --- EXPERIENCE YEARS ---
-@router.message(CandidateRegistration.entering_experience_years)
-async def handle_experience_years(message: types.Message, state: FSMContext):
+# --- ШАГ 3: Блок опыта работы ---
+@router.callback_query(ConfirmationCallback.filter(F.step == "start_exp"), CandidateRegistration.confirm_start_adding_experience)
+async def handle_start_experience(callback: CallbackQuery, callback_data: ConfirmationCallback, state: FSMContext):
+    if callback_data.action == "yes":
+        await callback.message.edit_text(Messages.CandidateProfile.ENTER_EXPERIENCE_COMPANY)
+        await state.set_state(CandidateRegistration.adding_exp_company)
+    else:
+        await callback.message.delete()
+        await _ask_for_skills(callback.message, state)
+    await callback.answer()
+
+@router.message(CandidateRegistration.adding_exp_company)
+async def handle_exp_company(message: Message, state: FSMContext):
+    await state.update_data(current_exp_company=message.text)
+    await message.answer(Messages.CandidateProfile.ENTER_EXPERIENCE_POSITION)
+    await state.set_state(CandidateRegistration.adding_exp_position)
+
+@router.message(CandidateRegistration.adding_exp_position)
+async def handle_exp_position(message: Message, state: FSMContext):
+    await state.update_data(current_exp_position=message.text)
+    await message.answer(Messages.CandidateProfile.ENTER_EXPERIENCE_START)
+    await state.set_state(CandidateRegistration.adding_exp_start_date)
+
+@router.message(CandidateRegistration.adding_exp_start_date)
+async def handle_exp_start_date(message: Message, state: FSMContext):
     try:
-        experience = float(message.text.replace(",", "."))
-        await state.update_data(experience_years=experience)
-        await state.update_data(skills=[], projects=[])
-        await message.answer(
-            "<b>Шаг 4/9: Блок навыков.</b>\n\n"
-            "Давайте добавим ваш первый навык. Введите его название (например, Python):"
-        )
-        await state.set_state(CandidateRegistration.adding_skill_name)
+        datetime.strptime(message.text, "%Y-%m-%d").date()
+        await state.update_data(current_exp_start_date=message.text)
+        await message.answer(Messages.CandidateProfile.ENTER_EXPERIENCE_END)
+        await state.set_state(CandidateRegistration.adding_exp_end_date)
     except ValueError:
-        await message.answer("Пожалуйста, введите число (например, 2 или 5.5).")
+        await message.answer(Messages.CandidateProfile.ENTER_EXPERIENCE_START_ERROR)
 
-# --- SKILLS ---
+@router.message(CandidateRegistration.adding_exp_end_date)
+async def handle_exp_end_date(message: Message, state: FSMContext):
+    end_date_str = message.text.lower()
+    end_date = None
+    if end_date_str not in ['сейчас', 'н.в.', 'present', 'текущее', 'настоящее', 'настоящее время']:
+        try:
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            data = await state.get_data()
+            start_date = datetime.strptime(data["current_exp_start_date"], "%Y-%m-%d").date()
+            if start_date > end_date:
+                await message.answer(Messages.CandidateRegistration.EXPERIENCE_DATE_ORDER_ERROR)
+                return
+            if end_date > date.today():
+                await message.answer(Messages.CandidateRegistration.EXPERIENCE_DATE_FUTURE_ERROR)
+                return
+            end_date = end_date_str
+        except ValueError:
+            await message.answer(Messages.CandidateProfile.ENTER_EXPERIENCE_END_ERROR)
+            return
+
+    await state.update_data(current_exp_end_date=end_date)
+    await message.answer(Messages.CandidateProfile.ENTER_EXPERIENCE_RESP)
+    await state.set_state(CandidateRegistration.adding_exp_responsibilities)
+
+@router.message(CandidateRegistration.adding_exp_responsibilities)
+@router.message(Command("skip"), CandidateRegistration.adding_exp_responsibilities)
+async def handle_exp_responsibilities(message: Message, state: FSMContext):
+    responsibilities = None
+    if message.text and not message.text.startswith('/skip'):
+        responsibilities = message.text
+
+    data = await state.get_data()
+    new_experience = {
+        "company": data.get("current_exp_company"),
+        "position": data.get("current_exp_position"),
+        "start_date": data.get("current_exp_start_date"),
+        "end_date": data.get("current_exp_end_date"),
+        "responsibilities": responsibilities
+    }
+    experiences_list = data.get("experiences", [])
+    experiences_list.append(new_experience)
+    await state.update_data(experiences=experiences_list)
+
+    await state.update_data(current_exp_company=None, current_exp_position=None, current_exp_start_date=None, current_exp_end_date=None)
+    await message.answer(
+        Messages.CandidateRegistration.EXPERIENCE_ADDED.format(company=new_experience['company']),
+        reply_markup=get_confirmation_keyboard(step="add_exp")
+    )
+    await state.set_state(CandidateRegistration.confirm_add_another_experience)
+
+@router.callback_query(ConfirmationCallback.filter(F.step == "add_exp"), CandidateRegistration.confirm_add_another_experience)
+async def handle_confirm_add_experience(callback: CallbackQuery, callback_data: ConfirmationCallback, state: FSMContext):
+    if callback_data.action == "yes":
+        await callback.message.edit_text(Messages.CandidateProfile.ENTER_EXPERIENCE_COMPANY)
+        await state.set_state(CandidateRegistration.adding_exp_company)
+    else:
+        await callback.message.delete()
+        await _ask_for_skills(callback.message, state)
+    await callback.answer()
+
+# --- ШАГ 4: Блок навыков ---
 @router.message(CandidateRegistration.adding_skill_name)
-async def handle_skill_name(message: types.Message, state: FSMContext):
+async def handle_skill_name(message: Message, state: FSMContext):
     await state.update_data(current_skill_name=message.text)
-    await message.answer("Отлично. Укажите тип этого навыка:", reply_markup=get_skill_kind_keyboard())
+    await message.answer(Messages.CandidateProfile.ENTER_SKILL_KIND, reply_markup=get_skill_kind_keyboard())
     await state.set_state(CandidateRegistration.adding_skill_kind)
 
 @router.callback_query(SkillKindCallback.filter(), CandidateRegistration.adding_skill_kind)
-async def handle_skill_kind(callback: types.CallbackQuery, callback_data: SkillKindCallback, state: FSMContext):
+async def handle_skill_kind(callback: CallbackQuery, callback_data: SkillKindCallback, state: FSMContext):
     await state.update_data(current_skill_kind=callback_data.kind)
-    await callback.message.edit_text("Понял. Теперь оцените свой уровень владения по шкале от 1 до 5:", reply_markup=get_skill_level_keyboard())
+    await callback.message.edit_text(Messages.CandidateProfile.ENTER_SKILL_LEVEL, reply_markup=get_skill_level_keyboard())
     await state.set_state(CandidateRegistration.adding_skill_level)
     await callback.answer()
 
 @router.callback_query(SkillLevelCallback.filter(), CandidateRegistration.adding_skill_level)
-async def handle_skill_level(callback: types.CallbackQuery, callback_data: SkillLevelCallback, state: FSMContext):
+async def handle_skill_level(callback: CallbackQuery, callback_data: SkillLevelCallback, state: FSMContext):
     data = await state.get_data()
 
     new_skill = {
@@ -77,59 +243,55 @@ async def handle_skill_level(callback: types.CallbackQuery, callback_data: Skill
     await state.update_data(current_skill_name=None, current_skill_kind=None)
 
     await callback.message.edit_text(
-        f"✅ Навык '{new_skill['skill']}' добавлен. Хотите добавить еще один?",
+        Messages.CandidateRegistration.SKILL_ADDED.format(skill=new_skill['skill']),
         reply_markup=get_confirmation_keyboard(step="add_skill")
     )
     await state.set_state(CandidateRegistration.confirm_add_another_skill)
     await callback.answer()
 
 @router.callback_query(ConfirmationCallback.filter(F.step == "add_skill"), CandidateRegistration.confirm_add_another_skill)
-async def handle_confirm_add_skill(callback: types.CallbackQuery, callback_data: ConfirmationCallback, state: FSMContext):
+async def handle_confirm_add_skill(callback: CallbackQuery, callback_data: ConfirmationCallback, state: FSMContext):
     if callback_data.action == "yes":
-        await callback.message.edit_text("Введите название следующего навыка:")
+        await callback.message.edit_text(Messages.CandidateProfile.ENTER_SKILL_NAME)
         await state.set_state(CandidateRegistration.adding_skill_name)
     else:
-        await callback.message.edit_text(
-            "<b>Шаг 5/9: Блок проектов.</b>\n\n"
-            "Хотите добавить проекты/портфолио в свой профиль?",
-            reply_markup=get_confirmation_keyboard(step="start_project")
-        )
-        await state.set_state(CandidateRegistration.confirm_start_adding_projects)
+        await callback.message.delete()
+        await _ask_for_projects(callback.message, state)
     await callback.answer()
 
-# --- PROJECT ---
+# --- ШАГ 5: Блок проектов ---
 @router.callback_query(ConfirmationCallback.filter(F.step == "start_project"),
                        CandidateRegistration.confirm_start_adding_projects)
-async def handle_start_projects(callback: types.CallbackQuery, callback_data: ConfirmationCallback, state: FSMContext):
+async def handle_start_projects(callback: CallbackQuery, callback_data: ConfirmationCallback, state: FSMContext):
     if callback_data.action == "yes":
-        await callback.message.edit_text("Отлично! Введите название вашего проекта:")
+        await callback.message.edit_text(Messages.CandidateProfile.ENTER_PROJECT_TITLE)
         await state.set_state(CandidateRegistration.adding_project_title)
     else:
         await callback.message.delete()
-        await callback.message.answer("Хорошо, пропускаем этот шаг.")
-        await ask_for_location(callback.message, state)
+        await callback.message.answer(Messages.Common.CANCELLED)
+        await _ask_for_location(callback.message, state)
     await callback.answer()
 
 @router.message(CandidateRegistration.adding_project_title)
-async def handle_project_title(message: types.Message, state: FSMContext):
+async def handle_project_title(message: Message, state: FSMContext):
     await state.update_data(current_project_title=message.text)
-    await message.answer("Теперь добавьте краткое описание проекта. Можно отправить /skip, чтобы пропустить.")
+    await message.answer(Messages.CandidateProfile.ENTER_PROJECT_DESCRIPTION)
     await state.set_state(CandidateRegistration.adding_project_description)
 
 @router.message(CandidateRegistration.adding_project_description)
 @router.message(Command("skip"), CandidateRegistration.adding_project_description)
-async def handle_project_description(message: types.Message, state: FSMContext):
+async def handle_project_description(message: Message, state: FSMContext):
     if message.text and not message.text.startswith('/skip'):
         await state.update_data(current_project_description=message.text)
     else:
         await state.update_data(current_project_description=None)
 
-    await message.answer("И последнее: вставьте ссылки на проект (GitHub, сайт), если есть. Можно отправить /skip.")
+    await message.answer(Messages.CandidateProfile.ENTER_PROJECT_LINKS)
     await state.set_state(CandidateRegistration.adding_project_links)
 
 @router.message(CandidateRegistration.adding_project_links)
 @router.message(Command("skip"), CandidateRegistration.adding_project_links)
-async def handle_project_links(message: types.Message, state: FSMContext):
+async def handle_project_links(message: Message, state: FSMContext):
     data = await state.get_data()
     links = {}
     if message.text and not message.text.startswith('/skip'):
@@ -147,203 +309,157 @@ async def handle_project_links(message: types.Message, state: FSMContext):
     await state.update_data(current_project_title=None, current_project_description=None)
 
     await message.answer(
-        f"✅ Проект '{new_project['title']}' добавлен. Хотите добавить еще один?",
+        Messages.CandidateRegistration.PROJECT_ADDED.format(title=new_project['title']),
         reply_markup=get_confirmation_keyboard(step="add_project")
     )
     await state.set_state(CandidateRegistration.confirm_add_another_project)
 
-@router.callback_query(ConfirmationCallback.filter(F.step == "add_project"),
-                       CandidateRegistration.confirm_add_another_project)
-async def handle_confirm_add_project(callback: types.CallbackQuery, callback_data: ConfirmationCallback,
-                                     state: FSMContext):
+@router.callback_query(ConfirmationCallback.filter(F.step == "add_project"), CandidateRegistration.confirm_add_another_project)
+async def handle_confirm_add_project(callback: CallbackQuery, callback_data: ConfirmationCallback, state: FSMContext):
     if callback_data.action == "yes":
-        await callback.message.edit_text("Введите название следующего проекта:")
+        await callback.message.edit_text(Messages.CandidateProfile.ENTER_PROJECT_TITLE)
         await state.set_state(CandidateRegistration.adding_project_title)
     else:
         await callback.message.delete()
-        await ask_for_location(callback.message, state)
+        await _ask_for_location(callback.message, state)
     await callback.answer()
 
-# --- LOCATION ---
-async def ask_for_location(message: types.Message, state: FSMContext):
-    await message.answer("<b>Шаг 6/9:</b> Укажите вашу текущую локацию (например, Москва или EU):")
-    await state.set_state(CandidateRegistration.entering_location)
-
+# --- ШАГ 6-7: Локация и формат работы ---
 @router.message(CandidateRegistration.entering_location)
-async def handle_location(message: types.Message, state: FSMContext):
-    await state.update_data(location=message.text)
+async def handle_location(message: Message, state: FSMContext):
+    await state.update_data(location=message.text.capitalize())
     await state.update_data(work_modes=[])
     await message.answer(
-        "<b>Шаг 7/9:</b> Выберите желаемые форматы работы:",
-        reply_markup=get_work_modes_keyboard()
+        "<b>Шаг 7/11:</b> Выберите желаемые форматы работы: 🏠\n"
+        "Текущий выбор: пусто",
+        reply_markup=get_work_modes_keyboard(selected=set())
     )
     await state.set_state(CandidateRegistration.entering_work_modes)
 
-# --- WORK MODE ---
 @router.callback_query(WorkModeCallback.filter(F.mode != "done"), CandidateRegistration.entering_work_modes)
-async def handle_work_mode_selection(callback: types.CallbackQuery, callback_data: WorkModeCallback, state: FSMContext):
+async def handle_work_mode_selection(callback: CallbackQuery, callback_data: WorkModeCallback, state: FSMContext):
     data = await state.get_data()
-    selected_modes = data.get("work_modes", [])
+    selected_modes = set(data.get("work_modes", []))
 
-    if callback_data.mode not in selected_modes:
-        selected_modes.append(callback_data.mode)
-    else:
+    if callback_data.mode in selected_modes:
         selected_modes.remove(callback_data.mode)
+    else:
+        selected_modes.add(callback_data.mode)
 
-    await state.update_data(work_modes=selected_modes)
-    await callback.answer(f"Выбранные форматы: {', '.join(selected_modes) if selected_modes else 'пусто'}")
-
-@router.callback_query(WorkModeCallback.filter(F.mode == "done"), CandidateRegistration.entering_work_modes)
-async def handle_work_mode_done(callback: types.CallbackQuery, state: FSMContext):
-    telegram_id = callback.from_user.id
-    print(f"handle_work_mode_done called with telegram_id={telegram_id}")
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(
-        "<b>Шаг 8/9:</b> Отлично! Теперь загрузите ваше резюме в формате PDF или DOCX (до 10 МБ).\n"
-        "Если резюме пока нет, можете пропустить этот шаг, отправив команду /skip."
+    await state.update_data(work_modes=list(selected_modes))
+    await callback.message.edit_text(
+        "<b>Шаг 7/11:</b> Выберите желаемые форматы работы: 🏠\n"
+        f"Текущий выбор: {', '.join(selected_modes) if selected_modes else 'пусто'}",
+        reply_markup=get_work_modes_keyboard(selected=selected_modes)
     )
-    await state.set_state(CandidateRegistration.uploading_resume)
     await callback.answer()
 
-# --- RESUME ---
-@router.message(F.document, CandidateRegistration.uploading_resume)
-async def handle_resume_upload(message: types.Message, state: FSMContext):
-    user_telegram_id = message.from_user.id
-    print(f"handle_resume_upload called with telegram_id={user_telegram_id}")
+@router.callback_query(WorkModeCallback.filter(F.mode == "done"), CandidateRegistration.entering_work_modes)
+async def handle_work_mode_done(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    selected_modes = data.get("work_modes", [])
+    if not selected_modes:
+        await callback.message.edit_text(Messages.Common.INVALID_INPUT)
+        await callback.message.edit_reply_markup(reply_markup=get_work_modes_keyboard(selected=set(selected_modes)))
+        await callback.answer()
+        return
+    await callback.message.edit_text(
+        f"<b>Шаг 7/11:</b> Форматы работы выбраны: {', '.join(selected_modes) if selected_modes else 'не выбрано'} ✅",
+        reply_markup=None
+    )
+    await _ask_for_contacts(callback.message, state)
+    await callback.answer()
 
-    await message.answer("Загружаю ваше резюме...")
+# --- ШАГ 8: Контакты ---
+@router.message(CandidateRegistration.entering_contacts)
+@router.message(Command("skip"), CandidateRegistration.entering_contacts)
+async def handle_contacts(message: Message, state: FSMContext):
+    contacts = {}
+    if message.text and not message.text.startswith('/skip'):
+        pairs = message.text.split(',')
+        for pair in pairs:
+            try:
+                key, value = pair.split(':', 1)
+                key = key.strip().lower()
+                value = value.strip()
+                if key == "email" and not re.match(r"[^@]+@[^@]+\.[^@]+", value):
+                    await message.answer(Messages.CandidateRegistration.CONTACTS_EMAIL_ERROR)
+                    return
+                if key == "phone" and not value.startswith('+'):
+                    await message.answer(Messages.CandidateRegistration.CONTACTS_PHONE_WARNING)
+                contacts[key] = value
+            except ValueError:
+                await message.answer(Messages.CandidateRegistration.CONTACTS_FORMAT_ERROR)
+                return
+    await state.update_data(contacts=contacts)
+    await _ask_for_visibility(message, state)
+
+# --- ШАГ 9: Видимость контактов ---
+@router.callback_query(ContactsVisibilityCallback.filter(), CandidateRegistration.choosing_contacts_visibility)
+async def handle_contacts_visibility(callback: CallbackQuery, callback_data: ContactsVisibilityCallback, state: FSMContext):
+    await state.update_data(contacts_visibility=callback_data.visibility)
+    await callback.message.edit_text(f"✅ Видимость контактов установлена: {callback_data.visibility.capitalize()}")
+    await _ask_for_resume(callback.message, state)
+    await callback.answer()
+
+# --- ШАГ 10: Резюме ---
+@router.message(F.document, CandidateRegistration.uploading_resume)
+async def handle_resume_upload(message: Message, state: FSMContext):
+    await message.answer(Messages.CandidateRegistration.RESUME_UPLOADING)
     file_info = await message.bot.get_file(message.document.file_id)
     file_data = await message.bot.download_file(file_info.file_path)
 
-    new_file_response = await file_api_client.upload_file(
-        filename=message.document.file_name,
-        file_data=file_data.read(),
-        content_type=message.document.mime_type,
-        owner_id=user_telegram_id,
-        file_type='resume'
+    file_response = await file_api_client.upload_file(
+        filename=message.document.file_name, file_data=file_data.read(), content_type=message.document.mime_type,
+        owner_id=message.from_user.id, file_type='resume'
     )
-    if not new_file_response:
-        await message.answer("❌ Ошибка при загрузке файла. Попробуйте снова.")
+    if not file_response:
+        await message.answer(Messages.CandidateRegistration.RESUME_ERROR)
         return
 
-    new_file_id = new_file_response['id']
-
-    old_file_id_to_delete = None
-    candidate_profile = await candidate_api_client.get_candidate_by_telegram_id(user_telegram_id)
-    if candidate_profile and candidate_profile.get("resumes"):
-        old_file_id_to_delete = candidate_profile["resumes"][0]["file_id"]
-
-    await message.answer("Привязываю резюме к вашему профилю...")
-    success_replace = await candidate_api_client.replace_resume(user_telegram_id, new_file_id)
-    if not success_replace:
-        await message.answer("❌ Ошибка при привязке резюме к профилю.")
-        return
-
-    if old_file_id_to_delete:
-        await file_api_client.delete_file(old_file_id_to_delete, owner_telegram_id=user_telegram_id)
-        print(f"Old resume file {old_file_id_to_delete} has been marked for deletion.")
-
-    user_data = await state.get_data()
-    await message.answer("Сохраняю остальные данные профиля...")
-
-    profile_success = await candidate_api_client.update_candidate_profile(user_telegram_id, user_data)
-
-    if profile_success:
-        await message.answer(
-            "<b>Шаг 9/9:</b> Загрузите аватарку (фото, до 5 МБ).\n"
-            "Если хотите пропустить, отправьте /skip."
-        )
-        await state.set_state(CandidateRegistration.uploading_avatar)
-    else:
-        await message.answer("❌ Произошла ошибка при обновлении данных профиля.")
-        await state.clear()
+    await state.update_data(resume_file_id=file_response['id'])
+    await message.answer(Messages.CandidateRegistration.RESUME_SUCCESS)
+    await _ask_for_avatar(message, state)
 
 @router.message(Command("skip"), CandidateRegistration.uploading_resume)
-async def handle_skip_resume(message: types.Message, state: FSMContext):
-    user_telegram_id = message.from_user.id
-    print(f"handle_skip_resume called with telegram_id={user_telegram_id}")
-    await message.answer("Хорошо, вы сможете загрузить резюме позже через команду /profile.")
+async def handle_skip_resume(message: Message, state: FSMContext):
+    await message.answer(Messages.CandidateRegistration.RESUME_SKIPPED)
+    await _ask_for_avatar(message, state)
 
-    user_data = await state.get_data()
-    telegram_id = message.from_user.id
-
-    await message.answer("Спасибо! Сохраняю ваш профиль...")
-
-    profile_success = await candidate_api_client.update_candidate_profile(telegram_id, user_data)
-
-    if profile_success:
-        await message.answer(
-            "<b>Шаг 9/9:</b> Загрузите аватарку (фото, до 5 МБ).\n"
-            "Если хотите пропустить, отправьте /skip."
-        )
-        await state.set_state(CandidateRegistration.uploading_avatar)
-    else:
-        await message.answer(
-            "❌ Произошла ошибка при обновлении профиля. Попробуйте позже."
-        )
-        await state.clear()
-
-# --- AVATAR ---
+# --- ШАГ 11: Аватар и ЗАВЕРШЕНИЕ ---
 @router.message(F.photo, CandidateRegistration.uploading_avatar)
-async def handle_avatar_upload(message: types.Message, state: FSMContext):
-    user_telegram_id = message.from_user.id
-    print(f"handle_avatar_upload (registration) called with telegram_id={user_telegram_id}")
-
-    await message.answer("Обрабатываю фото...")
-
+async def handle_avatar_upload(message: Message, state: FSMContext):
+    await message.answer(Messages.CandidateRegistration.AVATAR_PROCESSING)
     photo = message.photo[-1]
     file_info = await message.bot.get_file(photo.file_id)
     file_data = await message.bot.download_file(file_info.file_path)
 
-    extension = file_info.file_path.split('.')[-1].lower()
-    content_type = 'image/jpeg' if extension in ['jpg', 'jpeg'] else 'image/png' if extension == 'png' else 'image/jpeg'
-    filename = f"{photo.file_unique_id}.{extension}"
-
     file_response = await file_api_client.upload_file(
-        filename=filename,
-        file_data=file_data.read(),
-        content_type=content_type,
-        owner_id=user_telegram_id,
-        file_type='avatar'
+        filename=f"{photo.file_unique_id}.jpg", file_data=file_data.read(), content_type="image/jpeg",
+        owner_id=message.from_user.id, file_type='avatar'
     )
-    if not file_response:
-        await message.answer("❌ Ошибка при загрузке фото. Попробуйте снова.")
-        return
-
-    new_file_id = file_response['id']
-    success = await candidate_api_client.replace_avatar(
-        telegram_id=user_telegram_id,
-        file_id=new_file_id
-    )
-
-    if success:
-        await message.answer(
-            "✅ Ваш профиль успешно создан/обновлен с аватаркой!\n\n"
-            "Вы всегда можете его дополнить, используя команду /profile."
-        )
+    if file_response:
+        await state.update_data(avatar_file_id=file_response['id'])
+        await message.answer(Messages.CandidateRegistration.AVATAR_SUCCESS)
     else:
-        await message.answer(
-            "❌ Произошла ошибка при обновлении аватара. Профиль сохранён без аватарки."
-        )
+        await message.answer(Messages.CandidateRegistration.AVATAR_ERROR)
 
-    await state.clear()
+    await _finish_registration(message, state)
 
 @router.message(Command("skip"), CandidateRegistration.uploading_avatar)
-async def handle_skip_avatar(message: types.Message, state: FSMContext):
-    user_telegram_id = message.from_user.id
-    print(f"handle_skip_avatar called with telegram_id={user_telegram_id}")
-    await message.answer(
-        "✅ Ваш профиль успешно создан/обновлен без аватарки!\n\n"
-        "Вы всегда можете добавить аватарку через команду /profile."
-    )
-    await state.clear()
+async def handle_skip_avatar(message: Message, state: FSMContext):
+    await message.answer(Messages.CandidateRegistration.AVATAR_SKIPPED)
+    await _finish_registration(message, state)
 
-# --- CANCEL ---
+# --- Общий хендлер отмены ---
 @router.message(Command("cancel"))
-async def cancel_handler(message: types.Message, state: FSMContext):
+async def cancel_handler(message: Message, state: FSMContext):
     current_state = await state.get_state()
-    if current_state is None:
-        return
-
+    if current_state is None: return
     await state.clear()
-    await message.answer("Действие отменено.")
+    await message.answer(Messages.Common.CANCELLED)
+
+# --- Fallback для неверного ввода в любых состояниях CandidateRegistration ---
+@router.message(StateFilter("CandidateRegistration:*"))
+async def invalid_input(message: Message):
+    await message.answer(Messages.Common.INVALID_INPUT)
