@@ -11,6 +11,7 @@ class CandidateRegistration(StatesGroup):
     adding_exp_end_date = State()
     adding_exp_responsibilities = State()
     confirm_add_another_experience = State()
+    confirm_start_adding_skill = State()
     adding_skill_name = State()
     adding_skill_kind = State()
     adding_skill_level = State()

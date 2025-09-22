@@ -27,7 +27,7 @@ async def cq_select_candidate(callback: CallbackQuery, state: FSMContext):
     )
 
     await state.set_state(CandidateRegistration.entering_display_name)
-    await callback.message.edit_text(Messages.CandidateRegistration.STEP_1)
+    await callback.message.edit_text(Messages.Profile.ENTER_NAME)
 
 @router.callback_query(RoleCallback.filter(F.role_name == "employer"))
 async def cq_select_employer(callback: CallbackQuery, state: FSMContext):
