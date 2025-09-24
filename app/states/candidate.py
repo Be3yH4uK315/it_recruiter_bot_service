@@ -1,62 +1,11 @@
 from aiogram.fsm.state import State, StatesGroup
 
-# --- CANDIDATE ---
-class CandidateRegistration(StatesGroup):
-    entering_display_name = State()
-    entering_headline_role = State()
-    confirm_start_adding_experience = State()
-    adding_exp_company = State()
-    adding_exp_position = State()
-    adding_exp_start_date = State()
-    adding_exp_end_date = State()
-    adding_exp_responsibilities = State()
-    confirm_add_another_experience = State()
-    confirm_start_adding_skill = State()
-    adding_skill_name = State()
-    adding_skill_kind = State()
-    adding_skill_level = State()
-    confirm_add_another_skill = State()
-    confirm_start_adding_projects = State()
-    adding_project_title = State()
-    adding_project_description = State()
-    adding_project_links = State()
-    confirm_add_another_project = State()
-    entering_location = State()
-    entering_work_modes = State()
-    entering_contacts = State()
-    choosing_contacts_visibility = State()
-    uploading_resume = State()
-    uploading_avatar = State()
-    confirm_skip_avatar = State()
-
-class CandidateProfileEdit(StatesGroup):
-
-    editing_visibility = State()
-    confirm_edit_another_experience = State()
-    editing_exp_responsibilities = State()
-    editing_exp_end_date = State()
-    editing_exp_start_date = State()
-    editing_exp_position = State()
-    editing_exp_company = State()
-    choosing_field = State()
-    editing_field = State()
-
-    editing_skill_name = State()
-    editing_skill_kind = State()
-    editing_skill_level = State()
-    confirm_edit_another_skill = State()
-
-    editing_project_title = State()
-    editing_project_description = State()
-    editing_project_links = State()
-    confirm_edit_another_project = State()
-
-    editing_work_modes = State()
-
-    uploading_resume = State()
-
-    uploading_avatar = State()
-
-    confirm_edit_experience = State()
-
-    editing_contacts = State()
+class CandidateFSM(StatesGroup):
+    entering_basic_info = State()  # Ввод имени, роли, локации (подшаги в data['current_field'])
+    block_entry = State()  # Ввод блоков: опыт, навыки, проекты (data['block_type'], data['current_step'])
+    selecting_options = State()  # Выбор: work_modes, skill_kind, skill_level, contacts_visibility
+    confirm_action = State()  # Подтверждения: add_another, start_adding (data['action_type'])
+    uploading_file = State()  # Загрузка: resume/avatar (data['file_type'])
+    choosing_field = State()  # Выбор поля для редактирования
+    editing_contacts = State()  # Отдельное для контактов
+    showing_profile = State()  # Финальное отображение
