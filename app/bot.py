@@ -4,7 +4,7 @@ from logging.handlers import RotatingFileHandler
 import os
 from aiogram import Bot, Dispatcher
 from app.core.config import BOT_TOKEN
-from app.handlers import common, candidate_registration, employer_search, candidate_profile
+from app.handlers import candidate_handlers, common, employer_search
 from app.middlewares.logging import LoggingMiddleware, CustomFormatter
 from app.middlewares.fsm_timeout import FSMTimeoutMiddleware
 
@@ -34,8 +34,7 @@ async def main():
     dp.callback_query.outer_middleware(LoggingMiddleware())
     
     dp.include_router(common.router)
-    dp.include_router(candidate_registration.router)
-    dp.include_router(candidate_profile.router)
+    dp.include_router(candidate_handlers.router)
     dp.include_router(employer_search.router)
     
     try:

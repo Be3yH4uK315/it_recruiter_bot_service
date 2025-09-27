@@ -1,5 +1,3 @@
-# app/core/messages.py
-
 class Messages:
     class Common:
         START = (
