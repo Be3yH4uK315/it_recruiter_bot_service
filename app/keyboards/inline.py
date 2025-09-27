@@ -1,51 +1,52 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters.callback_data import CallbackData
-from typing import Literal
+from typing import Literal, Set
 
-# --- CONTACTS VISIBILITY ---
 class ContactsVisibilityCallback(CallbackData, prefix="vis"):
+    """Callback для выбора видимости контактов."""
     visibility: str
 
-# --- SKILLS ---
 class SkillKindCallback(CallbackData, prefix="skill_kind"):
+    """Callback для выбора типа навыка."""
     kind: str
 
 class SkillLevelCallback(CallbackData, prefix="skill_level"):
+    """Callback для выбора уровня навыка."""
     level: int
 
-# --- CONFIM ---
 class ConfirmationCallback(CallbackData, prefix="confirm"):
+    """Callback для подтверждения действий."""
     action: Literal["yes", "no"]
     step: str
 
-# --- ROLE ---
 class RoleCallback(CallbackData, prefix="role"):
+    """Callback для выбора роли."""
     role_name: str
 
-# --- EDIT ---
 class EditFieldCallback(CallbackData, prefix="edit_field"):
+    """Callback для выбора поля редактирования."""
     field_name: str
 
-# --- WORK MODE ---
 class WorkModeCallback(CallbackData, prefix="work_mode"):
+    """Callback для выбора формата работы."""
     mode: str
 
-# --- ACTION ---
 class ProfileAction(CallbackData, prefix="profile_action"):
+    """Callback для действий с профилем."""
     action: str
 
-# --- DECISION ---
 class SearchResultDecision(CallbackData, prefix="search_dec"):
+    """Callback для решений по результатам поиска."""
     action: str
     candidate_id: str
 
-# --- ACTION ---
 class SearchResultAction(CallbackData, prefix="search_res"):
+    """Callback для действий с результатами поиска."""
     action: str
     candidate_id: str
 
-# --- KEYBOARDS ---
 def get_role_selection_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора роли."""
     keyboard = [
         [
             InlineKeyboardButton(
@@ -63,6 +64,7 @@ def get_role_selection_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_contacts_visibility_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура видимости контактов."""
     keyboard = [
         [
             InlineKeyboardButton(
@@ -81,42 +83,25 @@ def get_contacts_visibility_keyboard() -> InlineKeyboardMarkup:
                 text="Скрытые (hidden)",
                 callback_data=ContactsVisibilityCallback(visibility="hidden").pack()
             )
-        ]
+        ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def get_work_modes_keyboard(selected: set[str] | None = None) -> InlineKeyboardMarkup:
-    if selected is None:
-        selected = set()
-
-    def label(text: str, mode: str) -> str:
-        return f"✅ {text}" if mode in selected else text
-
+def get_work_modes_keyboard(selected: Set[str] = set()) -> InlineKeyboardMarkup:
+    """Клавиатура форматов работы (с отмеченными)."""
+    modes = ["office", "remote", "hybrid", "done"]
     keyboard = [
         [
             InlineKeyboardButton(
-                text=label("Удаленно", "remote"),
-                callback_data=WorkModeCallback(mode="remote").pack()
-            ),
-            InlineKeyboardButton(
-                text=label("Офис", "office"),
-                callback_data=WorkModeCallback(mode="office").pack()
-            ),
-            InlineKeyboardButton(
-                text=label("Гибрид", "hybrid"),
-                callback_data=WorkModeCallback(mode="hybrid").pack()
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                text="Готово",
-                callback_data=WorkModeCallback(mode="done").pack()
-            )
+                text=f"{'✅ ' if m in selected else ''}{m.capitalize()}" if m != "done" else "Готово",
+                callback_data=WorkModeCallback(mode=m).pack(),
+            ) for m in modes
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_profile_actions_keyboard(has_avatar: bool = False, has_resume: bool = False) -> InlineKeyboardMarkup:
+    """Клавиатура выбора работы с профилем."""
     keyboard = [
         [InlineKeyboardButton(text="🖼️ Сменить аватар", callback_data=ProfileAction(action="upload_avatar").pack())],
         [InlineKeyboardButton(text="✏️ Редактировать профиль", callback_data=ProfileAction(action="edit").pack())],
@@ -129,6 +114,7 @@ def get_profile_actions_keyboard(has_avatar: bool = False, has_resume: bool = Fa
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_initial_search_keyboard(candidate_id: str, has_resume: bool) -> InlineKeyboardMarkup:
+    """Клавиатура выбора действия по результату поиска."""
     keyboard = [
         [
             InlineKeyboardButton(
@@ -159,6 +145,7 @@ def get_initial_search_keyboard(candidate_id: str, has_resume: bool) -> InlineKe
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_liked_candidate_keyboard(candidate_id: str) -> InlineKeyboardMarkup:
+    """Клавиатура для лайкнутого кандидата."""
     keyboard = [
         [
             InlineKeyboardButton(
@@ -176,6 +163,7 @@ def get_liked_candidate_keyboard(candidate_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_profile_edit_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура редактирования профиля."""
     keyboard = [
         [
             InlineKeyboardButton(text="Аватарка", callback_data=EditFieldCallback(field_name="avatar").pack()),
@@ -203,6 +191,7 @@ def get_profile_edit_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_skill_kind_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора типа навыка."""
     buttons = [
         [InlineKeyboardButton(text="Hard Skill", callback_data=SkillKindCallback(kind="hard").pack())],
         [InlineKeyboardButton(text="Инструмент (Tool)", callback_data=SkillKindCallback(kind="tool").pack())],
@@ -211,6 +200,7 @@ def get_skill_kind_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_skill_level_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора уровня навыка."""
     buttons = [
         [
             InlineKeyboardButton(text=str(i), callback_data=SkillLevelCallback(level=i).pack())
@@ -220,6 +210,7 @@ def get_skill_level_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_confirmation_keyboard(step: str) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения действия."""
     buttons = [
         [
             InlineKeyboardButton(text="✅ Да", callback_data=ConfirmationCallback(action="yes", step=step).pack()),

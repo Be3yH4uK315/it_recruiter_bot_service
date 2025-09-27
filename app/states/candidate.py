@@ -1,6 +1,7 @@
 from aiogram.fsm.state import State, StatesGroup
 
 class CandidateFSM(StatesGroup):
+    """FSM состояния для кандидата (регистрация и редактирование)."""
     entering_basic_info = State()  # Ввод имени, роли, локации (подшаги в data['current_field'])
     block_entry = State()  # Ввод блоков: опыт, навыки, проекты (data['block_type'], data['current_step'])
     selecting_options = State()  # Выбор: work_modes, skill_kind, skill_level, contacts_visibility

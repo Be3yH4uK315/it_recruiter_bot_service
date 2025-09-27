@@ -6,8 +6,10 @@ from aiogram import Bot, Dispatcher
 from app.core.config import BOT_TOKEN
 from app.handlers import common, candidate_registration, employer_search, candidate_profile
 from app.middlewares.logging import LoggingMiddleware, CustomFormatter
+from app.middlewares.fsm_timeout import FSMTimeoutMiddleware
 
-def setup_logging():
+def setup_logging() -> None:
+    """Настройка логирования."""
     log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
     log_file = os.getenv('LOG_FILE', 'bot.log')
     
@@ -20,19 +22,21 @@ def setup_logging():
     logging.getLogger().addHandler(file_handler)
 
 async def main():
+    """Главная функция запуска бота."""
     setup_logging()
     
     bot = Bot(token=BOT_TOKEN, parse_mode='HTML')
     
     dp = Dispatcher()
     
+    dp.update.middleware(FSMTimeoutMiddleware())
     dp.message.outer_middleware(LoggingMiddleware())
     dp.callback_query.outer_middleware(LoggingMiddleware())
     
     dp.include_router(common.router)
     dp.include_router(candidate_registration.router)
-    dp.include_router(employer_search.router)
     dp.include_router(candidate_profile.router)
+    dp.include_router(employer_search.router)
     
     try:
         await dp.start_polling(bot)

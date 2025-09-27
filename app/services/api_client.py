@@ -28,6 +28,7 @@ class APINetworkError(APIRequestError):
     pass
 
 def serialize_dates(obj: Any) -> Any:
+    """Сериализация дат в ISO формат."""
     if isinstance(obj, date):
         return obj.isoformat()
     elif isinstance(obj, dict):
@@ -37,6 +38,7 @@ def serialize_dates(obj: Any) -> Any:
     return obj
 
 def retry_api_call():
+    """Настройка retry для API-запросов."""
     return retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=8),
@@ -44,16 +46,18 @@ def retry_api_call():
         reraise=True
     )
 
-# --- КЛИЕНТ ДЛЯ CANDIDATE SERVICE ---
 class CandidateAPIClient:
+    """Клиент для работы с кандидатами."""
     def __init__(self):
         self.base_url = f"{CANDIDATE_SERVICE_URL}/candidates"
         self.timeout = httpx.Timeout(10.0, connect=5.0)
+        self.headers = {"Content-Type": "application/json"}
 
     @retry_api_call()
     async def create_candidate(
         self, telegram_id: int, telegram_name: str
     ) -> Optional[Dict[str, Any]]:
+        """Создание кандидата."""
         payload = {
             "telegram_id": telegram_id,
             "display_name": "FCs",
@@ -62,24 +66,18 @@ class CandidateAPIClient:
             "contacts": {"telegram": f"@{telegram_name}"},
             "skills": [],
         }
+        payload = serialize_dates(payload)
 
         async with httpx.AsyncClient(
             http2=False, trust_env=False, timeout=self.timeout
         ) as client:
             try:
-                response = await client.post(f"{self.base_url}/", json=payload)
-
+                response = await client.post(f"{self.base_url}/", json=payload, headers=self.headers)
                 if response.status_code == 409:
-                    logger.info(
-                        f"Candidate with telegram_id {telegram_id} already exists."
-                    )
+                    logger.info(f"Candidate with telegram_id {telegram_id} already exists.")
                     return None
-
                 response.raise_for_status()
-
-                logger.info(
-                    f"Successfully created candidate with telegram_id {telegram_id}"
-                )
+                logger.info(f"Successfully created candidate with telegram_id {telegram_id}")
                 return response.json()
             except httpx.HTTPStatusError as e:
                 raise APIHTTPError(e.response.status_code, f"HTTP error: {e.response.text}")
@@ -88,6 +86,7 @@ class CandidateAPIClient:
 
     @retry_api_call()
     async def get_candidate_by_telegram_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
+        """Получение кандидата по telegram_id."""
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
                 response = await client.get(f"{self.base_url}/by-telegram/{telegram_id}")
@@ -103,6 +102,7 @@ class CandidateAPIClient:
 
     @retry_api_call()
     async def get_candidate(self, candidate_id: str) -> Optional[Dict[str, Any]]:
+        """Получение кандидата по candidate_id."""
         async with httpx.AsyncClient(
             http2=False, trust_env=False, timeout=self.timeout
         ) as client:
@@ -119,6 +119,7 @@ class CandidateAPIClient:
     async def update_candidate_profile(
         self, telegram_id: int, profile_data: dict
     ) -> bool:
+        """Обновление кандидата."""
         url = f"{self.base_url}/by-telegram/{telegram_id}"
 
         payload = serialize_dates(profile_data.copy())
@@ -127,11 +128,9 @@ class CandidateAPIClient:
             http2=False, trust_env=False, timeout=self.timeout
         ) as client:
             try:
-                response = await client.patch(url, json=payload)
+                response = await client.patch(url, json=payload, headers=self.headers)
                 response.raise_for_status()
-                logger.info(
-                    f"Successfully updated profile for telegram_id {telegram_id}"
-                )
+                logger.info(f"Successfully updated profile for telegram_id {telegram_id}")
                 return True
             except httpx.HTTPStatusError as e:
                 raise APIHTTPError(e.response.status_code, f"HTTP error: {e.response.text}")
@@ -140,11 +139,13 @@ class CandidateAPIClient:
 
     @retry_api_call()
     async def replace_resume(self, telegram_id: int, file_id: UUID) -> bool:
+        """Добавление/замена резюме."""
         url = f"{self.base_url}/by-telegram/{telegram_id}/resume"
         payload = {"file_id": str(file_id)}
+        payload = serialize_dates(payload)
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
-                response = await client.put(url, json=payload)
+                response = await client.put(url, json=payload, headers=self.headers)
                 response.raise_for_status()
                 return True
             except httpx.HTTPStatusError as e:
@@ -154,11 +155,13 @@ class CandidateAPIClient:
 
     @retry_api_call()
     async def replace_avatar(self, telegram_id: int, file_id: UUID) -> bool:
+        """Добавление/замена аватара."""
         url = f"{self.base_url}/by-telegram/{telegram_id}/avatar"
         payload = {"file_id": str(file_id)}
+        payload = serialize_dates(payload)
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
-                response = await client.put(url, json=payload)
+                response = await client.put(url, json=payload, headers=self.headers)
                 response.raise_for_status()
                 logger.info(f"Successfully replaced avatar for telegram_id {telegram_id}")
                 return True
@@ -169,6 +172,7 @@ class CandidateAPIClient:
 
     @retry_api_call()
     async def delete_avatar(self, telegram_id: int) -> bool:
+        """Удаление аватара."""
         url = f"{self.base_url}/by-telegram/{telegram_id}/avatar"
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
@@ -183,6 +187,7 @@ class CandidateAPIClient:
 
     @retry_api_call()
     async def delete_resume(self, telegram_id: int) -> bool:
+        """Удаление резюме."""
         url = f"{self.base_url}/by-telegram/{telegram_id}/resume"
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
@@ -195,20 +200,23 @@ class CandidateAPIClient:
             except httpx.RequestError as e:
                 raise APINetworkError(f"Network error: {str(e)}")
 
-# --- EMPLOYER ---
 class EmployerAPIClient:
+    """Клиент для работы с работодателями."""
     def __init__(self):
         self.base_url = f"{EMPLOYER_SERVICE_URL}/employers"
         self.timeout = httpx.Timeout(10.0, connect=5.0)
+        self.headers = {"Content-Type": "application/json"}
 
     @retry_api_call()
     async def get_or_create_employer(self, telegram_id: int, username: str) -> Optional[Dict[str, Any]]:
+        """Создание работодателя"""
         payload = {"telegram_id": telegram_id, "contacts": {"telegram": f"@{username}"}}
+        payload = serialize_dates(payload)
         async with httpx.AsyncClient(
             http2=False, trust_env=False, timeout=self.timeout
         ) as client:
             try:
-                response = await client.post(self.base_url, json=payload)
+                response = await client.post(self.base_url, json=payload, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
@@ -218,12 +226,14 @@ class EmployerAPIClient:
 
     @retry_api_call()
     async def create_search_session(self, employer_id: str, filters: dict) -> Optional[Dict[str, Any]]:
+        """Создание сессии поиска."""
         payload = {"title": f"Search for {filters.get('role', 'candidate')}", "filters": filters}
+        payload = serialize_dates(payload)
         async with httpx.AsyncClient(
             http2=False, trust_env=False, timeout=self.timeout
         ) as client:
             try:
-                response = await client.post(f"{self.base_url}/{employer_id}/searches", json=payload)
+                response = await client.post(f"{self.base_url}/{employer_id}/searches", json=payload, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
@@ -233,11 +243,13 @@ class EmployerAPIClient:
 
     @retry_api_call()
     async def save_decision(self, session_id: str, candidate_id: str, decision: str) -> bool:
+        """Сохранение выбора работодателя."""
         url = f"{self.base_url}/searches/{session_id}/decisions"
         payload = {"candidate_id": candidate_id, "decision": decision}
+        payload = serialize_dates(payload)
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
-                response = await client.post(url, json=payload)
+                response = await client.post(url, json=payload, headers=self.headers)
                 response.raise_for_status()
                 logger.info(f"Decision '{decision}' for candidate {candidate_id} in session {session_id} saved.")
                 return True
@@ -248,11 +260,13 @@ class EmployerAPIClient:
 
     @retry_api_call()
     async def request_contacts(self, employer_id: str, candidate_id: str) -> Optional[Dict[str, Any]]:
+        """Запрос контактов."""
         url = f"{self.base_url}/{employer_id}/contact-requests"
         payload = {"candidate_id": candidate_id}
+        payload = serialize_dates(payload)
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
-                response = await client.post(url, json=payload)
+                response = await client.post(url, json=payload, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
@@ -260,17 +274,19 @@ class EmployerAPIClient:
             except httpx.RequestError as e:
                 raise APINetworkError(f"Network error: {str(e)}")
 
-# --- SEARCH ---
 class SearchAPIClient:
+    """Клиент для работы с поиском."""
     def __init__(self):
         self.base_url = f"{SEARCH_SERVICE_URL}/search"
         self.timeout = httpx.Timeout(10.0, connect=5.0)
+        self.headers = {"Content-Type": "application/json"}
 
     @retry_api_call()
     async def search_candidates(self, filters: dict) -> Optional[Dict[str, Any]]:
+        """Поиск кандидатов."""
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
-                response = await client.post(self.base_url, json=filters)
+                response = await client.post(self.base_url, json=filters, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
@@ -278,14 +294,15 @@ class SearchAPIClient:
             except httpx.RequestError as e:
                 raise APINetworkError(f"Network error: {str(e)}")
 
-# --- FILE ---
 class FileAPIClient:
+    """Клиент для работы с файлами."""
     def __init__(self):
         self.base_url = f"{FILE_SERVICE_URL}/files"
         self.timeout = httpx.Timeout(10.0, connect=5.0)
 
     @retry_api_call()
     async def upload_file(self, filename: str, file_data: bytes, content_type: str, owner_id: int, file_type: str) -> Optional[Dict[str, Any]]:
+        """Обновление файлов."""
         data = {"owner_telegram_id": owner_id, "file_type": file_type}
         files = {'file': (filename, file_data, content_type)}
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
@@ -300,6 +317,7 @@ class FileAPIClient:
 
     @retry_api_call()
     async def get_download_url_by_file_id(self, file_id: UUID) -> Optional[str]:
+        """Получение ссылки на файл."""
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
                 response = await client.get(f"{self.base_url}/{file_id}/download-url")
@@ -312,6 +330,7 @@ class FileAPIClient:
 
     @retry_api_call()
     async def delete_file(self, file_id: UUID, owner_telegram_id: int) -> bool:
+        """Удаление файла."""
         params = {"owner_telegram_id": owner_telegram_id}
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
@@ -324,7 +343,6 @@ class FileAPIClient:
             except httpx.RequestError as e:
                 raise APINetworkError(f"Network error: {str(e)}")
 
-# --- API ---
 candidate_api_client = CandidateAPIClient()
 employer_api_client = EmployerAPIClient()
 search_api_client = SearchAPIClient()

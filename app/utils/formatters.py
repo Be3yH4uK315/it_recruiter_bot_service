@@ -20,7 +20,7 @@ def format_candidate_profile(profile: Dict[str, Any]) -> str:
             if exp.get('responsibilities'):
                 text += f" <i>{exp.get('responsibilities')[:200]}</i>\n"
             text += (
-                f"  • <b>{exp.get('position')}</b> в {exp.get('company')}\n"
+                f"  • <b>{exp.get('position', 'Не указана')}</b> в {exp.get('company', 'Не указана')}\n"
                 f"    <i>({start_date} - {end_date})</i>\n"
             )
     else:
@@ -28,9 +28,18 @@ def format_candidate_profile(profile: Dict[str, Any]) -> str:
 
     skills = profile.get('skills', [])
     if skills:
-        hard_skills = [s['skill'] for s in skills if s['kind'] == 'hard']
-        tools = [s['skill'] for s in skills if s['kind'] == 'tool']
-        languages = [s['skill'] for s in skills if s['kind'] == 'language']
+        hard_skills = [
+            f"{s['skill']} ({s['level']}/5)"
+            for s in skills if s['kind'] == 'hard'
+        ]
+        tools = [
+            f"{s['skill']} ({s['level']}/5)"
+            for s in skills if s['kind'] == 'tool'
+        ]
+        languages = [
+            f"{s['skill']} ({s['level']}/5)"
+            for s in skills if s['kind'] == 'language'
+        ]
         skills_text = "\n<b>🛠 Ключевые навыки и инструменты:</b>\n"
         if hard_skills:
             skills_text += f" • <b>Hard Skills:</b> {', '.join(hard_skills)}\n"
@@ -39,6 +48,8 @@ def format_candidate_profile(profile: Dict[str, Any]) -> str:
         if languages:
             skills_text += f" • <b>Языки:</b> {', '.join(languages)}\n"
         text += skills_text
+    else:
+        text += "\n<b>🛠 Навыки:</b> Не указаны\n"
 
     projects = profile.get('projects', [])
     if projects:
@@ -51,5 +62,7 @@ def format_candidate_profile(profile: Dict[str, Any]) -> str:
                 text += f" (<a href='{p['links']['main_link']}'>Ссылка</a>)\n"
             else:
                 text += "\n"
+    else:
+        text += "\n<b>🚀 Проекты:</b> Не указаны\n"
 
     return text

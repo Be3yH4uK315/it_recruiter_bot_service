@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings
 load_dotenv()
 
 class Settings(BaseSettings):
+    """Конфигурация приложения."""
     BOT_TOKEN: str = Field(..., env="BOT_TOKEN")
     CANDIDATE_SERVICE_URL: str = Field(..., env="CANDIDATE_SERVICE_URL")
     EMPLOYER_SERVICE_URL: str = Field(..., env="EMPLOYER_SERVICE_URL")

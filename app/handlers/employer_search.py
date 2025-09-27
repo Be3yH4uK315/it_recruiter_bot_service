@@ -2,19 +2,23 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, ReplyKeyboardRemove
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from typing import Dict, Any, Optional, List
 from app.states.employer import EmployerSearch
 from app.services.api_client import employer_api_client, search_api_client, candidate_api_client, file_api_client
 from app.keyboards.inline import get_liked_candidate_keyboard, get_initial_search_keyboard, SearchResultAction, SearchResultDecision
 from app.utils.formatters import format_candidate_profile
 from app.core.messages import Messages
+import logging
 
 router = Router()
+logger = logging.getLogger(__name__)
 
-async def show_candidate_profile(message: Message | CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    idx = data.get('current_index', 0)
-    found_profiles = data.get('found_profiles', [])
-    session_id = data.get('session_id')
+async def show_candidate_profile(message: Message | CallbackQuery, state: FSMContext) -> None:
+    """Отображение профиля кандидата в поиске."""
+    data: Dict[str, Any] = await state.get_data()
+    idx: int = data.get('current_index', 0)
+    found_profiles: List[Dict[str, Any]] = data.get('found_profiles', [])
+    session_id: Optional[str] = data.get('session_id')
     target_message = message.message if isinstance(message, CallbackQuery) else message
 
     if not found_profiles or idx >= len(found_profiles):
@@ -26,7 +30,7 @@ async def show_candidate_profile(message: Message | CallbackQuery, state: FSMCon
     profile = found_profiles[idx]
     candidate_id = profile['id']
 
-    avatar_url = None
+    avatar_url: Optional[str] = None
     if profile.get("avatar_file_id"):
         avatar_url = await file_api_client.get_download_url_by_file_id(profile["avatar_file_id"])
 
@@ -40,7 +44,7 @@ async def show_candidate_profile(message: Message | CallbackQuery, state: FSMCon
         if avatar_url:
             if current_message_is_photo:
                 await target_message.edit_media(media=InputMediaPhoto(media=avatar_url, caption=caption),
-                                               reply_markup=keyboard)
+                                                reply_markup=keyboard)
             else:
                 await target_message.delete()
                 await target_message.answer_photo(photo=avatar_url, caption=caption, reply_markup=keyboard)
@@ -51,23 +55,31 @@ async def show_candidate_profile(message: Message | CallbackQuery, state: FSMCon
             else:
                 await target_message.edit_text(text=caption, reply_markup=keyboard)
     except Exception as e:
-        print(f"Failed to edit message: {e}. Sending a new one.")
+        logger.error(f"Error showing candidate profile for user {message.from_user.id}: {str(e)}")
         await target_message.answer(text=caption, reply_markup=keyboard)
 
     if isinstance(message, CallbackQuery):
         await message.answer()
 
 @router.message(Command("search"))
-async def cmd_search(message: Message, state: FSMContext):
+async def cmd_search(message: Message, state: FSMContext) -> None:
+    """Обработка команды /search."""
     await state.clear()
+    logger.info(f"User {message.from_user.id} started search")
     await state.update_data(filter_step='role')
     await state.set_state(EmployerSearch.entering_filters)
     await message.answer(Messages.EmployerSearch.STEP_1)
 
 @router.message(EmployerSearch.entering_filters)
-async def handle_filter_input(message: Message, state: FSMContext):
-    data = await state.get_data()
-    filter_step = data.get('filter_step', 'role')
+async def handle_filter_input(message: Message, state: FSMContext) -> None:
+    """Обработка ввода фильтров."""
+    data: Dict[str, Any] = await state.get_data()
+    filter_step: Optional[str] = data.get('filter_step')
+    if filter_step is None:
+        logger.warning(f"No filter_step for user {message.from_user.id}")
+        await message.answer(Messages.Common.INVALID_INPUT)
+        return
+    logger.info(f"User {message.from_user.id} entering filter: {filter_step}, input={message.text}")
     try:
         if filter_step == 'role':
             await state.update_data(role=message.text)
@@ -90,8 +102,8 @@ async def handle_filter_input(message: Message, state: FSMContext):
             exp_max = float(parts[1].strip()) if len(parts) > 1 else None
             await state.update_data(experience_min=exp_min, experience_max=exp_max)
             await message.answer(Messages.EmployerSearch.STEP_5)
-            await state.update_data(filter_step='location')
-        elif filter_step == 'location':
+            await state.update_data(filter_step='location_and_work_modes')
+        elif filter_step == 'location_and_work_modes':
             if message.text != "/skip":
                 await state.update_data(location_query=message.text)
             await message.answer(Messages.EmployerSearch.SAVING, reply_markup=ReplyKeyboardRemove())
@@ -121,19 +133,22 @@ async def handle_filter_input(message: Message, state: FSMContext):
             await state.set_state(EmployerSearch.showing_results)
             await message.answer(Messages.EmployerSearch.FOUND.format(total=total_found))
             await show_candidate_profile(message, state)
-    except (ValueError, IndexError):
+    except (ValueError, IndexError) as e:
+        logger.warning(f"Invalid filter input from user {message.from_user.id}: {str(e)}")
         await message.answer(Messages.Common.INVALID_INPUT)
 
-async def process_next_candidate(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
+async def process_next_candidate(callback: CallbackQuery, state: FSMContext) -> None:
+    """Переход к следующему кандидату."""
+    data: Dict[str, Any] = await state.get_data()
     new_index = data.get('current_index', 0) + 1
     await state.update_data(current_index=new_index)
     await show_candidate_profile(callback, state)
 
 @router.callback_query(SearchResultDecision.filter(), EmployerSearch.showing_results)
-async def handle_decision(callback: CallbackQuery, callback_data: SearchResultDecision, state: FSMContext):
-    data = await state.get_data()
-    session_id = data.get("session_id")
+async def handle_decision(callback: CallbackQuery, callback_data: SearchResultDecision, state: FSMContext) -> None:
+    """Обработка решения по кандидату (like/next)."""
+    data: Dict[str, Any] = await state.get_data()
+    session_id: Optional[str] = data.get("session_id")
     if not session_id:
         await callback.answer(Messages.EmployerSearch.SESSION_EXPIRED, show_alert=True)
         return
@@ -154,12 +169,14 @@ async def handle_decision(callback: CallbackQuery, callback_data: SearchResultDe
         await process_next_candidate(callback, state)
 
 @router.callback_query(SearchResultAction.filter(F.action == "next"), EmployerSearch.showing_results)
-async def handle_next_candidate(callback: CallbackQuery, state: FSMContext):
+async def handle_next_candidate(callback: CallbackQuery, state: FSMContext) -> None:
+    """Переход к следующему кандидату."""
     await process_next_candidate(callback, state)
 
 @router.callback_query(SearchResultAction.filter(F.action == "contact"), EmployerSearch.showing_results)
-async def handle_show_contact(callback: CallbackQuery, callback_data: SearchResultAction, state: FSMContext):
-    data = await state.get_data()
+async def handle_show_contact(callback: CallbackQuery, callback_data: SearchResultAction, state: FSMContext) -> None:
+    """Запрос контактов кандидата."""
+    data: Dict[str, Any] = await state.get_data()
     employer_profile = data.get('employer_profile')
     if not employer_profile:
         await callback.answer(Messages.EmployerSearch.SESSION_EXPIRED, show_alert=True)
@@ -180,7 +197,8 @@ async def handle_show_contact(callback: CallbackQuery, callback_data: SearchResu
         await callback.message.answer(Messages.EmployerSearch.CONTACTS_DENIED)
 
 @router.callback_query(SearchResultAction.filter(F.action == "get_resume"), EmployerSearch.showing_results)
-async def handle_get_resume(callback: CallbackQuery, callback_data: SearchResultAction, state: FSMContext):
+async def handle_get_resume(callback: CallbackQuery, callback_data: SearchResultAction, state: FSMContext) -> None:
+    """Получение резюме кандидата."""
     await callback.answer("Запрашиваю профиль...")
     profile = await candidate_api_client.get_candidate(callback_data.candidate_id)
     if not profile or not profile.get("resumes"):
