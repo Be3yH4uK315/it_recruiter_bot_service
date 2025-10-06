@@ -36,7 +36,7 @@ async def show_candidate_profile(message: Message | CallbackQuery, state: FSMCon
 
     caption = format_candidate_profile(profile)
     has_resume = profile.get("has_resume", False)
-    keyboard = get_initial_search_keyboard(session_id, candidate_id, has_resume)
+    keyboard = get_initial_search_keyboard(candidate_id, has_resume)
 
     current_message_is_photo = bool(target_message.photo)
 
@@ -74,65 +74,77 @@ async def cmd_search(message: Message, state: FSMContext) -> None:
 async def handle_filter_input(message: Message, state: FSMContext) -> None:
     """Обработка ввода фильтров."""
     data: Dict[str, Any] = await state.get_data()
-    filter_step: Optional[str] = data.get('filter_step')
+    filter_step: Optional[str] = data.get("filter_step")
     if filter_step is None:
         logger.warning(f"No filter_step for user {message.from_user.id}")
         await message.answer(Messages.Common.INVALID_INPUT)
         return
     logger.info(f"User {message.from_user.id} entering filter: {filter_step}, input={message.text}")
     try:
-        if filter_step == 'role':
+        if filter_step == "role":
             await state.update_data(role=message.text)
             await message.answer(Messages.EmployerSearch.STEP_2)
-            await state.update_data(filter_step='must_skills')
-        elif filter_step == 'must_skills':
-            skills = [s.strip().lower() for s in message.text.split(',')]
+            await state.update_data(filter_step="must_skills")
+        elif filter_step == "must_skills":
+            skills = [s.strip().lower() for s in message.text.split(",")]
             await state.update_data(must_skills=skills)
             await message.answer(Messages.EmployerSearch.STEP_3)
-            await state.update_data(filter_step='nice_skills')
-        elif filter_step == 'nice_skills':
+            await state.update_data(filter_step="nice_skills")
+        elif filter_step == "nice_skills":
             if message.text != "/skip":
-                skills = [s.strip().lower() for s in message.text.split(',')]
+                skills = [s.strip().lower() for s in message.text.split(",")]
                 await state.update_data(nice_skills=skills)
             await message.answer(Messages.EmployerSearch.STEP_4)
-            await state.update_data(filter_step='experience')
-        elif filter_step == 'experience':
-            parts = message.text.replace(',', '.').split('-')
+            await state.update_data(filter_step="experience")
+        elif filter_step == "experience":
+            parts = message.text.replace(",", ".").split("-")
             exp_min = float(parts[0].strip())
             exp_max = float(parts[1].strip()) if len(parts) > 1 else None
             await state.update_data(experience_min=exp_min, experience_max=exp_max)
             await message.answer(Messages.EmployerSearch.STEP_5)
-            await state.update_data(filter_step='location_and_work_modes')
-        elif filter_step == 'location_and_work_modes':
+            await state.update_data(filter_step="location_and_work_modes")
+        elif filter_step == "location_and_work_modes":
             if message.text != "/skip":
                 await state.update_data(location_query=message.text)
             await message.answer(Messages.EmployerSearch.SAVING, reply_markup=ReplyKeyboardRemove())
             filters = await state.get_data()
-            employer_profile = await employer_api_client.get_or_create_employer(message.from_user.id, message.from_user.username)
+            employer_profile = await employer_api_client.get_or_create_employer(
+                message.from_user.id, message.from_user.username
+            )
             if not employer_profile:
                 await message.answer(Messages.EmployerSearch.EMPLOYER_ERROR)
                 await state.clear()
                 return
             await state.update_data(employer_profile=employer_profile)
-            search_session = await employer_api_client.create_search_session(employer_profile['id'], filters)
+            search_session = await employer_api_client.create_search_session(employer_profile["id"], filters)
             if not search_session:
                 await message.answer(Messages.EmployerSearch.SEARCH_ERROR)
                 await state.clear()
                 return
-            await state.update_data(session_id=search_session['id'])
-            filters['page'] = 1
-            filters['size'] = 5
+            await state.update_data(session_id=search_session["id"])
+            filters["page"] = 1
+            filters["size"] = 5
             search_response = await search_api_client.search_candidates(filters)
-            if not search_response or not search_response.get('results'):
+            if not search_response or not search_response.get("results"):
                 await message.answer(Messages.EmployerSearch.NO_RESULTS)
                 await state.clear()
                 return
-            found_profiles = [res['profile'] for res in search_response['results']]
-            total_found = search_response.get('total', 0)
+            found_profiles = []
+            for res in search_response["results"]:
+                candidate_id = res["candidate_id"]
+                profile = await candidate_api_client.get_candidate(candidate_id)
+                if profile:
+                    found_profiles.append(profile)
+            if not found_profiles:
+                await message.answer(Messages.EmployerSearch.NO_RESULTS)
+                await state.clear()
+                return
+            total_found = search_response.get("total", len(found_profiles))
             await state.update_data(found_profiles=found_profiles, current_index=0)
             await state.set_state(EmployerSearch.showing_results)
             await message.answer(Messages.EmployerSearch.FOUND.format(total=total_found))
             await show_candidate_profile(message, state)
+
     except (ValueError, IndexError) as e:
         logger.warning(f"Invalid filter input from user {message.from_user.id}: {str(e)}")
         await message.answer(Messages.Common.INVALID_INPUT)

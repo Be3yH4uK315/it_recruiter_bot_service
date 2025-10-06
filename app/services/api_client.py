@@ -216,7 +216,7 @@ class EmployerAPIClient:
             http2=False, trust_env=False, timeout=self.timeout
         ) as client:
             try:
-                response = await client.post(self.base_url, json=payload, headers=self.headers)
+                response = await client.post(f"{self.base_url}/", json=payload, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
@@ -286,7 +286,7 @@ class SearchAPIClient:
         """Поиск кандидатов."""
         async with httpx.AsyncClient(http2=False, trust_env=False, timeout=self.timeout) as client:
             try:
-                response = await client.post(self.base_url, json=filters, headers=self.headers)
+                response = await client.post(f"{self.base_url}/", json=filters, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPStatusError as e:
